@@ -13,7 +13,9 @@ The current implementation of the accelerometer driver is built to support I2C/S
 **STM32F303RET6**: [Product Website](https://www.st.com/en/evaluation-tools/nucleo-f303re.html), [Schematic](https://www.st.com/resource/en/schematic_pack/mb1136-default-c03_schematic.pdf), [HAL](https://www.st.com/resource/en/user_manual/um1786-description-of-stm32f3-hal-and-lowlayer-drivers-stmicroelectronics.pdf), [Reference Manual]([https://www.digikey.com/en/products/detail/texas-instruments/tca9548apwr/3615458?_gl=1*1p3cjpq*_up*MQ..&gclid=26fb766dc0161d939b531fa5d559c2f0&gclsrc=3p.ds](https://www.st.com/resource/en/reference_manual/DM00043574.pdf)) <br/>
 
 ## Specifications
-[
+
+[placeholder] <br/>
+
 ## Compiling
 
 [placeholder] <br/>
