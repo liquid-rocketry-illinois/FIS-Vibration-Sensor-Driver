@@ -57,6 +57,17 @@
 
 #define DATA_FORMAT_REG       (0x31)
 
+/*
+ *  Axes data
+ */
+
+#define DATA_X0_REG           (0x32)
+#define DATA_X1_REG           (0x33)
+#define DATA_Y0_REG           (0x34)
+#define DATA_Y1_REG           (0x35)
+#define DATA_Z0_REG           (0x36)
+#define DATA_Z1_REG           (0x37)
+
 
 /* USER CODE END PD */
 
