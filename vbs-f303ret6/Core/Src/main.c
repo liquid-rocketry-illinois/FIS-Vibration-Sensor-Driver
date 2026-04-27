@@ -32,6 +32,32 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
+#define DEVID_REG             (0x00)  // READ ONLY (Holds fixed ID code 0xE5)
+
+/*
+ *  8-bit registers holding user-set offset adjustment
+ *  (2's complement), scale factor 15.6 mb/LSB
+ */
+
+#define OFSX_REG              (0x1E)
+#define OFSY_REG              (0x1F)
+#define OFSZ_REG              (0x20)
+
+/*
+ *  D1 - Watermark
+ *  D0 - Overrun
+ */
+
+#define INT_SOURCE_REG        (0x30)  // READ ONLY
+
+/*
+ *  Clearing the SPI bit (Bit D6) in the
+ *  DATA_FORMAT register (Address 0x31) selects 4-wire mode
+ */
+
+#define DATA_FORMAT_REG       (0x31)
+
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -159,9 +185,9 @@ static void MX_SPI2_Init(void)
   hspi2.Instance = SPI2;
   hspi2.Init.Mode = SPI_MODE_MASTER;
   hspi2.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi2.Init.DataSize = SPI_DATASIZE_4BIT;
-  hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;
-  hspi2.Init.CLKPhase = SPI_PHASE_1EDGE;
+  hspi2.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi2.Init.CLKPolarity = SPI_POLARITY_HIGH;
+  hspi2.Init.CLKPhase = SPI_PHASE_2EDGE;
   hspi2.Init.NSS = SPI_NSS_SOFT;
   hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
   hspi2.Init.FirstBit = SPI_FIRSTBIT_MSB;
@@ -169,7 +195,7 @@ static void MX_SPI2_Init(void)
   hspi2.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
   hspi2.Init.CRCPolynomial = 7;
   hspi2.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
-  hspi2.Init.NSSPMode = SPI_NSS_PULSE_ENABLE;
+  hspi2.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
   if (HAL_SPI_Init(&hspi2) != HAL_OK)
   {
     Error_Handler();
