@@ -21,6 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stdio.h>
 
 /* USER CODE END Includes */
 
@@ -70,6 +71,21 @@
 
 // Might add FIFO registers later on
 
+#define VERIFY                (0xE5)  // ID code 0xE5
+
+// SPI access bitmasks
+
+#define ADXL345_RW            0x80  // Bit 7 (MSB)  R/W'
+#define ADXL345_MB            0x40  // Bit 6 (MB)   multibyte
+
+// CS configurations; CS is active high, pull low for slave access
+
+#define ADXL_CS_PORT           GPIOA
+#define ADXL_CS_PIN            GPIO_PIN_0
+
+#define CS_LOW()   HAL_GPIO_WritePin(ADXL_CS_PORT, ADXL_CS_PIN, GPIO_PIN_RESET)
+#define CS_HIGH()  HAL_GPIO_WritePin(ADXL_CS_PORT, ADXL_CS_PIN, GPIO_PIN_SET)
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -98,6 +114,40 @@ static void MX_USART3_UART_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+//  Writes uint8_t "value" to register specified by uint8_t value "reg"
+void SPI_WRITE(uint8_t reg, uint8_t value)
+{
+  /*
+   *  For write:
+   *  tx[1][7] = R/W', tx[1][6] = MB, tx[1][5:0] = Register address bits
+   *  tx[2][7:0] = Data bits
+   */
+
+  uint8_t tx[2] = {(reg & ~ADXL345_RW), value};
+  CS_LOW();
+  HAL_SPI_Transmit(&hspi2, tx, 2, HAL_MAX_DELAY);
+  CS_HIGH();
+}
+
+//  Reads from register specified by uint8_t value "reg"
+uint8_t SPI_READ(uint8_t reg)
+{
+  /*
+   *  For read:
+   *  tx[7] = R/W', tx[6] = MB, tx[5:0] = Register address bits
+   *  rx[7:0] = Data bits
+   */
+
+  uint8_t tx  = (reg | ADXL345_RW);
+  uint8_t rx  = 0;
+  CS_LOW();
+  HAL_SPI_Transmit(&hspi2, &tx, 1, HAL_MAX_DELAY);
+  HAL_SPI_Receive(&hspi2, &rx, 1, HAL_MAX_DELAY);
+  CS_HIGH();
+
+  return rx;
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -109,6 +159,15 @@ int main(void)
 
   /* USER CODE BEGIN 1 */
 
+  /*
+   *  The timing scheme follows clock polarity (CPOL) = 1 (high)
+   *  and clock phase (CPHA) = 1 (falling edge)
+   *
+   *  ADXL345 communication is R/W' (MSB = 1 for read, MSB = 0 for write)
+   */
+
+  // int8_t spibuf[32];  // SPI buffer, holds 32x8b
+
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -117,7 +176,6 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
-  HAL_SPI_
 
   /* USER CODE END Init */
 
@@ -133,6 +191,12 @@ int main(void)
   MX_SPI2_Init();
   MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
+  CS_HIGH();          // SPI has CS active LOW, default HIGH
+
+  uint8_t id  = SPI_READ(DEVID_REG);
+  if (id == VERIFY) {
+    printf("[PASS] Device ID = 0x%02X\r\n", id);
+  }
 
   /* USER CODE END 2 */
 
