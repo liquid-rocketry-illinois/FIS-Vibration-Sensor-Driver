@@ -22,6 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <string.h>
 
 /* USER CODE END Includes */
 
@@ -33,52 +34,64 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-#define DEVID_REG             (0x00)  // READ ONLY (Holds fixed ID code 0xE5)
+#define DEVID_REG             (0x00)  // R
 
 /*
  *  8-bit registers holding user-set offset adjustment
  *  (2's complement), scale factor 15.6 mb/LSB
  */
 
-#define OFSX_REG              (0x1E)
-#define OFSY_REG              (0x1F)
-#define OFSZ_REG              (0x20)
+#define OFSX_REG              (0x1E)  // R/W
+#define OFSY_REG              (0x1F)  // R/W
+#define OFSZ_REG              (0x20)  // R/W
 
 /*
- *  D1 - Watermark
- *  D0 - Overrun
+ *  Interrupt registers
  */
 
-#define INT_SOURCE_REG        (0x30)  // READ ONLY
+#define INT_ENABLE_REG        (0x2E)  // R/W
+#define INT_MAP_REG           (0x2F)  // R/W
+#define INT_SOURCE_REG        (0x30)  // R
 
 /*
- *  Clearing the SPI bit (Bit D6) in the
- *  DATA_FORMAT register (Address 0x31) selects 4-wire mode
+ *  FIFO registers
  */
 
-#define DATA_FORMAT_REG       (0x31)
+
 
 /*
- *  Axes data
+ *  Initialized registers for data formatting and ODR, respectively
  */
 
-#define DATA_X0_REG           (0x32)
-#define DATA_X1_REG           (0x33)
-#define DATA_Y0_REG           (0x34)
-#define DATA_Y1_REG           (0x35)
-#define DATA_Z0_REG           (0x36)
-#define DATA_Z1_REG           (0x37)
+#define BW_RATE_REG           (0x2C)  // R/W
+#define POWER_CTL_REG         (0x2D)  // R/W
+#define DATA_FORMAT_REG       (0x31)  // R/W
 
-// Might add FIFO registers later on
+/*
+ *  Axes raw acceleration data (SEXT 10b 2's comp)
+ *  For register Ax (where A is X/Y/Z and x is 0/1), assuming right justify (DATA_FORMAT)
+ *  A1: MSB, D[15:8]; D[15:10]: sign extension
+ *  A0: LSB, D[7:0]
+ */
 
-#define VERIFY                (0xE5)  // ID code 0xE5
+#define DATA_X0_REG           (0x32)  // R
+#define DATA_X1_REG           (0x33)  // R
+#define DATA_Y0_REG           (0x34)  // R
+#define DATA_Y1_REG           (0x35)  // R
+#define DATA_Z0_REG           (0x36)  // R
+#define DATA_Z1_REG           (0x37)  // R
 
 // SPI access bitmasks
 
-#define ADXL345_RW            0x80  // Bit 7 (MSB)  R/W'
-#define ADXL345_MB            0x40  // Bit 6 (MB)   multibyte
+#define VERIFY                (0xE5)  // ID code 0xE5
+#define ADXL345_RW            (0x80)  // Bit 7 (MSB)  R/W'
+#define ADXL345_MB            (0x40)  // Bit 6 (MB)   multibyte
 
-// CS configurations; CS is active high, pull low for slave access
+/*
+ *  CS configurations; CS is active high, pull low for slave access
+ *  CS_LOW:   Pulls CS GPIO low (0)
+ *  CS_HIGH:  Pulls CS GPIO high (1)
+ */
 
 #define ADXL_CS_PORT           GPIOA
 #define ADXL_CS_PIN            GPIO_PIN_0
@@ -96,7 +109,7 @@
 /* Private variables ---------------------------------------------------------*/
 SPI_HandleTypeDef hspi2;
 
-UART_HandleTypeDef huart3;
+UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 
@@ -106,7 +119,7 @@ UART_HandleTypeDef huart3;
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_SPI2_Init(void);
-static void MX_USART3_UART_Init(void);
+static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -114,7 +127,12 @@ static void MX_USART3_UART_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-//  Writes uint8_t "value" to register specified by uint8_t value "reg"
+/**
+  *  @brief   Write to one register with a singular SPI transaction
+  *
+  *  @param   reg   register address
+  *  @param   value uint_t value to be written into specified register
+  */
 void SPI_WRITE(uint8_t reg, uint8_t value)
 {
   /*
@@ -123,29 +141,54 @@ void SPI_WRITE(uint8_t reg, uint8_t value)
    *  tx[2][7:0] = Data bits
    */
 
-  uint8_t tx[2] = {(reg & ~ADXL345_RW), value};
+  uint8_t tx[2] = { (reg & ~ADXL345_RW), value };
   CS_LOW();
   HAL_SPI_Transmit(&hspi2, tx, 2, HAL_MAX_DELAY);
   CS_HIGH();
 }
 
-//  Reads from register specified by uint8_t value "reg"
+/**
+  *  @brief   Read one register from a singular SPI transaction
+  *
+  *  @param   reg register address
+  *  @retval  rx data
+  */
 uint8_t SPI_READ(uint8_t reg)
 {
   /*
    *  For read:
-   *  tx[7] = R/W', tx[6] = MB, tx[5:0] = Register address bits
+   *  tx[7] = R/W', tx[6] = MB (kept at 0), tx[5:0] = Register address bits
    *  rx[7:0] = Data bits
    */
-
   uint8_t tx  = (reg | ADXL345_RW);
   uint8_t rx  = 0;
   CS_LOW();
   HAL_SPI_Transmit(&hspi2, &tx, 1, HAL_MAX_DELAY);
   HAL_SPI_Receive(&hspi2, &rx, 1, HAL_MAX_DELAY);
   CS_HIGH();
-
   return rx;
+}
+
+/**
+  *  @brief   Receive a block of data from a singular SPI transaction
+  *
+  *  @param   reg   first register address
+  *  @param   pData pointer to uint_8 data buffer
+  *  @param   len   consecutive number of registers to read from, inclusive (i.e., [reg:reg+len-1])
+  */
+void SPI_READ_BURST(uint8_t reg, uint8_t *pData, uint8_t len)
+{
+  /*
+   *  For read:
+   *  tx[7] = R/W', tx[6] = MB (1), tx[5:0] = Register address bits
+   *  rx[7:0] = Data bits
+   */
+
+  uint8_t tx  = (reg | ADXL345_RW | ADXL345_MB);
+  CS_LOW();
+  HAL_SPI_Transmit(&hspi2, &tx, 1, HAL_MAX_DELAY);
+  HAL_SPI_Receive(&hspi2, pData, len, HAL_MAX_DELAY);
+  CS_HIGH();
 }
 
 /* USER CODE END 0 */
@@ -158,15 +201,6 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
-  /*
-   *  The timing scheme follows clock polarity (CPOL) = 1 (high)
-   *  and clock phase (CPHA) = 1 (falling edge)
-   *
-   *  ADXL345 communication is R/W' (MSB = 1 for read, MSB = 0 for write)
-   */
-
-  // int8_t spibuf[32];  // SPI buffer, holds 32x8b
 
   /* USER CODE END 1 */
 
@@ -189,14 +223,58 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_SPI2_Init();
-  MX_USART3_UART_Init();
+  MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
+
+  // Initialization and troubleshooting
   CS_HIGH();          // SPI has CS active LOW, default HIGH
 
   uint8_t id  = SPI_READ(DEVID_REG);
   if (id == VERIFY) {
     printf("[PASS] Device ID = 0x%02X\r\n", id);
   }
+  else {
+    printf("[FAIL] Connection to device could not be established = 0x%02X\r\n", id);
+    Error_Handler();
+  }
+
+  /*
+   *  Sets the BW_RATE register (for ODR)
+   *  D[7:4]: 0
+   *  D[3:0]: RATE BITS (ADXL345 datasheet, Table 7)
+   */
+  SPI_WRITE(BW_RATE_REG, 0x0F);   // Sets ODR to 3200 Hz (bandwidth 1600 Hz)
+  printf("BW RATE: 0x%02X\r\n", SPI_READ(BW_RATE_REG));
+
+  /*
+   *  Sets the POWER_CTL register
+   *  D[7:6]:               00
+   *  D5:     LINK        = 0   (inactivity/activity functions concurrent)
+   *  D4:     AUTO_SLEEP  = 0   (disable auto-sleep)
+   *  D3:     MEASURE     = 1   (enable measurement mode)
+   *  D2:     SLEEP       = 0   (disable sleep mode)
+   *  D[1:0]: WAKEUP BITS = xx  (frequency of reading during sleep mode, not relevant)
+   *
+   *  0b00001000 > 0x08
+   */
+  SPI_WRITE(POWER_CTL_REG, 0x08);
+  printf("POWER CTL: 0x%02X\r\n", SPI_READ(POWER_CTL_REG));
+
+  /*
+   *  Sets the DATA_FORMAT register
+   *  D7:     SELF TEST   = 0
+   *  D6:     SPI         = 0 (Full duplex, 4w)
+   *  D5:     INT_INVERT  = 0 (Interrupts active high)
+   *  D4:                   0
+   *  D3:     FULL_RES    = 1 (4 mg/LSB scale factor)
+   *  D2:     JUSTIFY     = 0 (right justify)
+   *  D[1:0]: RANGE BITS  = 11 (+/- 16g)
+   *
+   *  0b00001011 > 0x0B
+   */
+  SPI_WRITE(DATA_FORMAT_REG, 0x0B);
+  printf("DATA FORMAT: 0x%02X\r\n", SPI_READ(DATA_FORMAT_REG));
+  HAL_Delay(5000); // 5-second delay for checking register return values
 
   /* USER CODE END 2 */
 
@@ -204,6 +282,20 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    uint8_t raw[6];
+    SPI_READ_BURST(DATA_X0_REG, raw, 6);
+
+    int16_t x   = (int16_t)(raw[1]<<8 | raw[0]);
+    int16_t y   = (int16_t)(raw[3]<<8 | raw[2]);
+    int16_t z   = (int16_t)(raw[5]<<8 | raw[4]);
+
+    printf("RAW DATA\r\n"
+           "X: %d\r\n"
+           "Y: %d\r\n"
+           "Z: %d\r\n",
+           x, y, z);
+
+    HAL_Delay(100);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -246,8 +338,8 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART3;
-  PeriphClkInit.Usart3ClockSelection = RCC_USART3CLKSOURCE_PCLK1;
+  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART2;
+  PeriphClkInit.Usart2ClockSelection = RCC_USART2CLKSOURCE_PCLK1;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
     Error_Handler();
@@ -267,6 +359,17 @@ static void MX_SPI2_Init(void)
   /* USER CODE END SPI2_Init 0 */
 
   /* USER CODE BEGIN SPI2_Init 1 */
+
+  /*
+   *  Note that APB1 clock runs at 8 MHz
+   *  with the current clock configuration.
+   *
+   *  SPI2 BaudRatePrescaler is 2:
+   *  8 MHz / 2 = 4 MHz SPI clock speed
+   *
+   *  The ADXL345 has a max SPI clock speed of 5 MHz
+   *  4 MHz < 5 MHz : within spec
+   */
 
   /* USER CODE END SPI2_Init 1 */
   /* SPI2 parameter configuration*/
@@ -295,37 +398,37 @@ static void MX_SPI2_Init(void)
 }
 
 /**
-  * @brief USART3 Initialization Function
+  * @brief USART2 Initialization Function
   * @param None
   * @retval None
   */
-static void MX_USART3_UART_Init(void)
+static void MX_USART2_UART_Init(void)
 {
 
-  /* USER CODE BEGIN USART3_Init 0 */
+  /* USER CODE BEGIN USART2_Init 0 */
 
-  /* USER CODE END USART3_Init 0 */
+  /* USER CODE END USART2_Init 0 */
 
-  /* USER CODE BEGIN USART3_Init 1 */
+  /* USER CODE BEGIN USART2_Init 1 */
 
-  /* USER CODE END USART3_Init 1 */
-  huart3.Instance = USART3;
-  huart3.Init.BaudRate = 38400;
-  huart3.Init.WordLength = UART_WORDLENGTH_8B;
-  huart3.Init.StopBits = UART_STOPBITS_1;
-  huart3.Init.Parity = UART_PARITY_NONE;
-  huart3.Init.Mode = UART_MODE_TX_RX;
-  huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart3.Init.OverSampling = UART_OVERSAMPLING_16;
-  huart3.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
-  huart3.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
-  if (HAL_UART_Init(&huart3) != HAL_OK)
+  /* USER CODE END USART2_Init 1 */
+  huart2.Instance = USART2;
+  huart2.Init.BaudRate = 38400;
+  huart2.Init.WordLength = UART_WORDLENGTH_8B;
+  huart2.Init.StopBits = UART_STOPBITS_1;
+  huart2.Init.Parity = UART_PARITY_NONE;
+  huart2.Init.Mode = UART_MODE_TX_RX;
+  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+  huart2.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+  huart2.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+  if (HAL_UART_Init(&huart2) != HAL_OK)
   {
     Error_Handler();
   }
-  /* USER CODE BEGIN USART3_Init 2 */
+  /* USER CODE BEGIN USART2_Init 2 */
 
-  /* USER CODE END USART3_Init 2 */
+  /* USER CODE END USART2_Init 2 */
 
 }
 
@@ -363,6 +466,13 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+// Overrides putchar function to transmit printing to ST-LINK via USART2
+int __io_putchar(int ch)
+{
+  HAL_UART_Transmit(&huart2, (uint8_t*)&ch, 1, HAL_MAX_DELAY);
+  return ch;
+}
+
 /* USER CODE END 4 */
 
 /**
@@ -373,6 +483,7 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
+  printf("[ERROR]");
   __disable_irq();
   while (1)
   {
