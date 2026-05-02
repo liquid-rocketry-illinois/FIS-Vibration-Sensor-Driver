@@ -66,4 +66,6 @@ The test connections to be made between the STM32H753ZI Nucleo-144 and MCP960 ar
 
 The .ioc enables SPI2, with connections as follows: SPI2_SCK > PF1, SPI_MOSI > PB15, SPI_MISO > PB14. The .ioc also enables 1 GPIO pin, A0, for CS.
 
+The .ioc enables USART3 for ST-LINK.
+
 The driver is written to interface with the STM32F303RET6. With respect to the .ioc file, all references are to the STM32F3 HAL and configured according to the STM32F3 schematic. The .ioc file currently enables the SPI2 peripheral: PF1 > SCLK, PB15 > MOSI, PB14 > MISO
