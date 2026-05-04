@@ -279,20 +279,6 @@ int main(void)
   printf("BW RATE: 0x%02X\r\n", SPI_READ(BW_RATE_REG));
 
   /*
-   *  Sets the INT_ENABLE register
-   *  D7:     DATA READY  = 0
-   *  D[6:5]: TAP EVENTS    xx
-   *  D[4:3]: ACTIVITY      xx
-   *  D2:     FREE FALL     x
-   *  D1:     WATERMARK   = 1
-   *  D0:     OVERRUN     = 1
-   *
-   *  0b00000011 > 0x03
-   */
-  SPI_WRITE(INT_ENABLE_REG, 0x03);
-  printf("POWER CTL: 0x%02X\r\n", SPI_READ(INT_ENABLE_REG));
-
-  /*
    *  Sets the POWER_CTL register
    *  D[7:6]:               00
    *  D5:     LINK        = 0   (inactivity/activity functions concurrent)
@@ -309,13 +295,38 @@ int main(void)
   /*
    *  Sets the FIFO_CTL register
    *  D[7:6]: FIFO MODE   = 10    (Stream mode)
-   *  D[5]:               = 0     (Trigger event of trigger mode linked to INT1)
+   *  D[5]:               = 1     (Trigger event of trigger mode linked to INT2)
    *  D[4:0]:             = 10000 (#16 FIFO entries to trigger watermark interrupt)
    *
-   *  0b10010000 > 0x90
+   *  0b10110000 > 0x90
    */
-  SPI_WRITE(FIFO_CTL_REG, FIFO_STREAM | FIFO_WATERMARK);
-  printf("FIFO CTL: 0x%02X\r\n", SPI_READ(FIFO_CTL_REG));   // expected 0x90
+  SPI_WRITE(FIFO_CTL_REG, FIFO_STREAM | 0x20 | FIFO_WATERMARK);
+  printf("FIFO CTL: 0x%02X\r\n", SPI_READ(FIFO_CTL_REG));   // expected 0xB0
+
+  /*
+   *  Sets the INT_ENABLE register
+   *  D7:     DATA READY  = 0
+   *  D[6:5]: TAP EVENTS    xx
+   *  D[4:3]: ACTIVITY      xx
+   *  D2:     FREE FALL     x
+   *  D1:     WATERMARK   = 1
+   *  D0:     OVERRUN     = 0
+   *
+   *  0b00000011 > 0x02
+   */
+  SPI_WRITE(INT_ENABLE_REG, 0x02);
+  printf("INT ENABLE: 0x%02X\r\n", SPI_READ(INT_ENABLE_REG));
+
+  /*
+   *  Sets the INT_MAP register
+   *  Same meaning as above, any interrupts from respective
+   *  functions (e.g., WATERMARK) is sent to INT1 if = 0,
+   *  INT2 if 1.
+   *
+   *  0b00000011 > 0x02
+   */
+  SPI_WRITE(INT_MAP_REG, 0x02);
+  printf("INT MAP: 0x%02X\r\n", SPI_READ(INT_MAP_REG));
 
   /*
    *  Sets the DATA_FORMAT register
@@ -339,24 +350,28 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    const uint16_t odr    = 3200;
     uint8_t fifo_status   = SPI_READ(FIFO_STATUS_REG);
     uint8_t fifo_entries  = (fifo_status & 0x3F);   //  bitmask of 6 LSB
 
+    if (fifo_entries >= FIFO_WATERMARK) {
+      uint8_t raw[6];
+      SPI_READ_BURST(DATA_X0_REG, raw, 6);
 
-    uint8_t raw[6];
-    SPI_READ_BURST(DATA_X0_REG, raw, 6);
+      int16_t x   = (int16_t)(raw[1]<<8 | raw[0]);
+      int16_t y   = (int16_t)(raw[3]<<8 | raw[2]);
+      int16_t z   = (int16_t)(raw[5]<<8 | raw[4]);
 
-    int16_t x   = (int16_t)(raw[1]<<8 | raw[0]);
-    int16_t y   = (int16_t)(raw[3]<<8 | raw[2]);
-    int16_t z   = (int16_t)(raw[5]<<8 | raw[4]);
-
-    printf("RAW DATA\r\n"
-           "X: %d\r\n"
-           "Y: %d\r\n"
-           "Z: %d\r\n",
-           x, y, z);
-
-    HAL_Delay(100);
+      printf("RAW DATA\r\n"
+             "X: %d\r\n"
+             "Y: %d\r\n"
+             "Z: %d\r\n",
+             x, y, z);
+    }
+    else {
+      printf("[WAIT] Polling threshold not reached.\r\n");
+    }
+    HAL_Delay(1000/odr);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
