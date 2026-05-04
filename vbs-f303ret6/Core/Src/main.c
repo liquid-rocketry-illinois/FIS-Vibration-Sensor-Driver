@@ -279,20 +279,6 @@ int main(void)
   printf("BW RATE: 0x%02X\r\n", SPI_READ(BW_RATE_REG));
 
   /*
-   *  Sets the POWER_CTL register
-   *  D[7:6]:               00
-   *  D5:     LINK        = 0   (inactivity/activity functions concurrent)
-   *  D4:     AUTO_SLEEP  = 0   (disable auto-sleep)
-   *  D3:     MEASURE     = 1   (enable measurement mode)
-   *  D2:     SLEEP       = 0   (disable sleep mode)
-   *  D[1:0]: WAKEUP BITS = xx  (frequency of reading during sleep mode, not relevant)
-   *
-   *  0b00001000 > 0x08
-   */
-  SPI_WRITE(POWER_CTL_REG, 0x08);
-  printf("POWER CTL: 0x%02X\r\n", SPI_READ(POWER_CTL_REG));
-
-  /*
    *  Sets the FIFO_CTL register
    *  D[7:6]: FIFO MODE   = 10    (Stream mode)
    *  D[5]:               = 1     (Trigger event of trigger mode linked to INT2)
@@ -342,6 +328,20 @@ int main(void)
    */
   SPI_WRITE(DATA_FORMAT_REG, 0x0B);
   printf("DATA FORMAT: 0x%02X\r\n", SPI_READ(DATA_FORMAT_REG));
+
+  /*
+   *  Sets the POWER_CTL register
+   *  D[7:6]:               00
+   *  D5:     LINK        = 0   (inactivity/activity functions concurrent)
+   *  D4:     AUTO_SLEEP  = 0   (disable auto-sleep)
+   *  D3:     MEASURE     = 1   (enable measurement mode)
+   *  D2:     SLEEP       = 0   (disable sleep mode)
+   *  D[1:0]: WAKEUP BITS = xx  (frequency of reading during sleep mode, not relevant)
+   *
+   *  0b00001000 > 0x08
+   */
+  SPI_WRITE(POWER_CTL_REG, 0x08);
+  printf("POWER CTL: 0x%02X\r\n", SPI_READ(POWER_CTL_REG));
   HAL_Delay(5000); // 5-second delay for checking register return values
 
   /* USER CODE END 2 */
@@ -350,7 +350,7 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    const uint16_t odr    = 3200;
+    const uint16_t odr    = 3200;                   //  output data rate
     uint8_t fifo_status   = SPI_READ(FIFO_STATUS_REG);
     uint8_t fifo_entries  = (fifo_status & 0x3F);   //  bitmask of 6 LSB
 
@@ -368,7 +368,8 @@ int main(void)
              "Z: %d\r\n",
              x, y, z);
     }
-    else {
+    else
+    {
       printf("[WAIT] Polling threshold not reached.\r\n");
     }
     HAL_Delay(1000/odr);
@@ -533,6 +534,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PA5 */
+  GPIO_InitStruct.Pin = GPIO_PIN_5;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
