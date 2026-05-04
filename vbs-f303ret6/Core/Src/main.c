@@ -57,7 +57,17 @@
  *  FIFO registers
  */
 
+#define FIFO_CTL_REG          (0x38)  // R/W
+#define FIFO_STATUS_REG       (0x39)  // R
 
+// FIFO access bitmasks
+
+#define FIFO_BYPASS           (0x00)  // 00xx xxxx
+#define FIFO_FIFO             (0x40)  // 01xx xxxx
+#define FIFO_STREAM           (0x80)  // 10xx xxxx
+#define FIFO_TRIGGER          (0xC0)  // 11xx xxxx
+
+#define FIFO_WATERMARK        (0x10)  // watermark = #16 (interrupt at 16 FIFO entries)
 
 /*
  *  Initialized registers for data formatting and ODR, respectively
@@ -88,16 +98,16 @@
 #define ADXL345_MB            (0x40)  // Bit 6 (MB)   multibyte
 
 /*
- *  CS configurations; CS is active high, pull low for slave access
- *  CS_LOW:   Pulls CS GPIO low (0)
- *  CS_HIGH:  Pulls CS GPIO high (1)
+ *  ADXL345 CS configurations; CS is active high, pull low for slave access
+ *  ADXL1_CS_LOW:   Pulls CS GPIO low (0)
+ *  ADXL1_CS_HIGH:  Pulls CS GPIO high (1)
  */
 
 #define ADXL_CS_PORT           GPIOA
 #define ADXL_CS_PIN            GPIO_PIN_0
 
-#define CS_LOW()   HAL_GPIO_WritePin(ADXL_CS_PORT, ADXL_CS_PIN, GPIO_PIN_RESET)
-#define CS_HIGH()  HAL_GPIO_WritePin(ADXL_CS_PORT, ADXL_CS_PIN, GPIO_PIN_SET)
+#define ADXL1_CS_LOW()   HAL_GPIO_WritePin(ADXL_CS_PORT, ADXL_CS_PIN, GPIO_PIN_RESET)
+#define ADXL1_CS_HIGH()  HAL_GPIO_WritePin(ADXL_CS_PORT, ADXL_CS_PIN, GPIO_PIN_SET)
 
 /* USER CODE END PD */
 
@@ -141,10 +151,32 @@ void SPI_WRITE(uint8_t reg, uint8_t value)
    *  tx[2][7:0] = Data bits
    */
 
-  uint8_t tx[2] = { (reg & ~ADXL345_RW), value };
-  CS_LOW();
+  uint8_t tx[2] = {(reg & ~ADXL345_RW), value};
+  ADXL1_CS_LOW();
   HAL_SPI_Transmit(&hspi2, tx, 2, HAL_MAX_DELAY);
-  CS_HIGH();
+  ADXL1_CS_HIGH();
+}
+
+/**
+  *  @brief   Receive a block of data from a singular SPI transaction
+  *
+  *  @param   reg   first register address
+  *  @param   pData pointer to uint_8 transmit data buffer
+  *  @param   len   consecutive number of registers to read from, inclusive (i.e., [reg:reg+len-1])
+  */
+void SPI_WRITE_BURST(uint8_t reg, uint8_t *pData, uint8_t len)
+{
+  /*
+   *  For read:
+   *  tx[7] = R/W', tx[6] = MB (1), tx[5:0] = Register address bits
+   *  rx[7:0] = Data bits
+   */
+
+  uint8_t tx[len];
+  tx[0]     = ((reg & ~ADXL345_RW) | ADXL345_MB);
+  ADXL1_CS_LOW();
+  HAL_SPI_Transmit(&hspi2, tx, len, HAL_MAX_DELAY);
+  ADXL1_CS_HIGH();
 }
 
 /**
@@ -162,10 +194,10 @@ uint8_t SPI_READ(uint8_t reg)
    */
   uint8_t tx  = (reg | ADXL345_RW);
   uint8_t rx  = 0;
-  CS_LOW();
+  ADXL1_CS_LOW();
   HAL_SPI_Transmit(&hspi2, &tx, 1, HAL_MAX_DELAY);
   HAL_SPI_Receive(&hspi2, &rx, 1, HAL_MAX_DELAY);
-  CS_HIGH();
+  ADXL1_CS_HIGH();
   return rx;
 }
 
@@ -185,10 +217,10 @@ void SPI_READ_BURST(uint8_t reg, uint8_t *pData, uint8_t len)
    */
 
   uint8_t tx  = (reg | ADXL345_RW | ADXL345_MB);
-  CS_LOW();
+  ADXL1_CS_LOW();
   HAL_SPI_Transmit(&hspi2, &tx, 1, HAL_MAX_DELAY);
   HAL_SPI_Receive(&hspi2, pData, len, HAL_MAX_DELAY);
-  CS_HIGH();
+  ADXL1_CS_HIGH();
 }
 
 /* USER CODE END 0 */
@@ -227,7 +259,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   // Initialization and troubleshooting
-  CS_HIGH();          // SPI has CS active LOW, default HIGH
+  ADXL1_CS_HIGH();          // SPI has CS active LOW, default HIGH
 
   uint8_t id  = SPI_READ(DEVID_REG);
   if (id == VERIFY) {
@@ -247,6 +279,20 @@ int main(void)
   printf("BW RATE: 0x%02X\r\n", SPI_READ(BW_RATE_REG));
 
   /*
+   *  Sets the INT_ENABLE register
+   *  D7:     DATA READY  = 0
+   *  D[6:5]: TAP EVENTS    xx
+   *  D[4:3]: ACTIVITY      xx
+   *  D2:     FREE FALL     x
+   *  D1:     WATERMARK   = 1
+   *  D0:     OVERRUN     = 1
+   *
+   *  0b00000011 > 0x03
+   */
+  SPI_WRITE(INT_ENABLE_REG, 0x03);
+  printf("POWER CTL: 0x%02X\r\n", SPI_READ(INT_ENABLE_REG));
+
+  /*
    *  Sets the POWER_CTL register
    *  D[7:6]:               00
    *  D5:     LINK        = 0   (inactivity/activity functions concurrent)
@@ -261,14 +307,25 @@ int main(void)
   printf("POWER CTL: 0x%02X\r\n", SPI_READ(POWER_CTL_REG));
 
   /*
+   *  Sets the FIFO_CTL register
+   *  D[7:6]: FIFO MODE   = 10    (Stream mode)
+   *  D[5]:               = 0     (Trigger event of trigger mode linked to INT1)
+   *  D[4:0]:             = 10000 (#16 FIFO entries to trigger watermark interrupt)
+   *
+   *  0b10010000 > 0x90
+   */
+  SPI_WRITE(FIFO_CTL_REG, FIFO_STREAM | FIFO_WATERMARK);
+  printf("FIFO CTL: 0x%02X\r\n", SPI_READ(FIFO_CTL_REG));   // expected 0x90
+
+  /*
    *  Sets the DATA_FORMAT register
    *  D7:     SELF TEST   = 0
-   *  D6:     SPI         = 0 (Full duplex, 4w)
-   *  D5:     INT_INVERT  = 0 (Interrupts active high)
+   *  D6:     SPI         = 0   (Full duplex, 4w)
+   *  D5:     INT_INVERT  = 0   (Interrupts active high)
    *  D4:                   0
-   *  D3:     FULL_RES    = 1 (4 mg/LSB scale factor)
-   *  D2:     JUSTIFY     = 0 (right justify)
-   *  D[1:0]: RANGE BITS  = 11 (+/- 16g)
+   *  D3:     FULL_RES    = 1   (4 mg/LSB scale factor)
+   *  D2:     JUSTIFY     = 0   (right justify)
+   *  D[1:0]: RANGE BITS  = 11  (+/- 16g)
    *
    *  0b00001011 > 0x0B
    */
@@ -282,6 +339,10 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    uint8_t fifo_status   = SPI_READ(FIFO_STATUS_REG);
+    uint8_t fifo_entries  = (fifo_status & 0x3F);   //  bitmask of 6 LSB
+
+
     uint8_t raw[6];
     SPI_READ_BURST(DATA_X0_REG, raw, 6);
 
@@ -450,10 +511,10 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0|GPIO_PIN_1, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : PA0 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0;
+  /*Configure GPIO pins : PA0 PA1 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
