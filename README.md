@@ -69,7 +69,7 @@ The test connections to be made between the STM32F303RET6 and ADXL345 breakout a
 
 ## Reference
 
-The .ioc enables SPI2, with connections as follows: SPI2_SCK > PF1, SPI_MOSI > PB15, SPI_MISO > PB14. The .ioc also enables 1 GPIO pin, A0, for CS.
+ADXL345 Interface: The .ioc enables SPI2, with connections as follows: SPI2_SCK > PF1, SPI_MOSI > PB15, SPI_MISO > PB14. The .ioc also enables 1 GPIO output pin, PA0, for CS. PA5 is enabled as a GPIO input pin for INT2 (interrupt) from the ADXL.
 
 The .ioc enables USART3 for ST-LINK.
 
