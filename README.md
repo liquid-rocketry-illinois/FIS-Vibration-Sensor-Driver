@@ -7,7 +7,7 @@ The current implementation of the accelerometer driver is built to support I2C/S
 ## Usage
 
 <img width="480" height="360" alt="thermocouple_driver_wiring" src="https://github.com/liquid-rocketry-illinois/FIS-Vibration-Sensor-Driver/blob/dev/imagery/vbs.jpg"/> <br/>
-The test connections to be made between the STM32H753ZI Nucleo-144 and MCP960 are to be made as follows: <br/>
+The test connections to be made between the STM32F303RET6 and ADXL345 breakout are to be made as follows: <br/>
 <table border="1" style="border-collapse: collapse;">
    <thead>
        <tr>
