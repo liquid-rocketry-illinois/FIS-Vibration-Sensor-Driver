@@ -264,7 +264,7 @@ int main(void)
   MX_SPI2_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
-  char msg[] = "BOOT\r\n";
+  char msg[] = "[BOOT]\r\n";
   HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
 
   // Initialization and troubleshooting
@@ -279,12 +279,14 @@ int main(void)
     Error_Handler();
   }
 
+  SPI_WRITE(INT_ENABLE_REG, 0x00); // disables interrupts
+
   /*
    *  Sets the BW_RATE register (for ODR)
    *  D[7:4]: 0
    *  D[3:0]: RATE BITS (ADXL345 datasheet, Table 7)
    */
-  SPI_WRITE(BW_RATE_REG, 0x0F);   // Sets ODR to 3200 Hz (bandwidth 1600 Hz)
+  SPI_WRITE(BW_RATE_REG, 0x0A);   // Sets ODR to 100 Hz (bandwidth 50 Hz), temporary
   printf("BW RATE: 0x%02X\r\n", SPI_READ(BW_RATE_REG));
 
   /*
@@ -297,20 +299,6 @@ int main(void)
    */
   SPI_WRITE(FIFO_CTL_REG, FIFO_STREAM | 0x20 | FIFO_WATERMARK);
   printf("FIFO CTL: 0x%02X\r\n", SPI_READ(FIFO_CTL_REG));   // expected 0xB0
-
-  /*
-   *  Sets the INT_ENABLE register
-   *  D7:     DATA READY  = 0
-   *  D[6:5]: TAP EVENTS    xx
-   *  D[4:3]: ACTIVITY      xx
-   *  D2:     FREE FALL     x
-   *  D1:     WATERMARK   = 1
-   *  D0:     OVERRUN     = 0
-   *
-   *  0b00000011 > 0x02
-   */
-  SPI_WRITE(INT_ENABLE_REG, 0x02);
-  printf("INT ENABLE: 0x%02X\r\n", SPI_READ(INT_ENABLE_REG));
 
   /*
    *  Sets the INT_MAP register
@@ -351,20 +339,37 @@ int main(void)
    */
   SPI_WRITE(POWER_CTL_REG, 0x08);
   printf("POWER CTL: 0x%02X\r\n", SPI_READ(POWER_CTL_REG));
-  HAL_Delay(5000); // 5-second delay for checking register return values
 
+  /*
+   *  Sets the INT_ENABLE register
+   *  D7:     DATA READY  = 0
+   *  D[6:5]: TAP EVENTS    xx
+   *  D[4:3]: ACTIVITY      xx
+   *  D2:     FREE FALL     x
+   *  D1:     WATERMARK   = 1
+   *  D0:     OVERRUN     = 0
+   *
+   *  0b00000011 > 0x02
+   */
+  SPI_WRITE(INT_ENABLE_REG, 0x02);
+  printf("INT ENABLE: 0x%02X\r\n", SPI_READ(INT_ENABLE_REG));
+
+  HAL_Delay(1000); // 1-second delay for checking register return values
+
+  __HAL_GPIO_EXTI_CLEAR_IT(INT2_Pin);
+  fifo_ready = 0;
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    if (1)
+    if (fifo_ready)
     {
-      HAL_Delay(1000);
+      printf("[FIFO] Detected interrupt.\r\n");
       fifo_ready            = 0;  // clears interrupt flag
       uint8_t fifo_status   = SPI_READ(FIFO_STATUS_REG);
-      uint8_t fifo_entries  = (fifo_status & 0x3F);   //  bitmask of 6 LSB
+      uint8_t fifo_entries  = (fifo_status & 0x3F);     //  bitmask of 6 LSB
 
       for (uint8_t i = 0; i < fifo_entries; i++)
       {
@@ -377,10 +382,16 @@ int main(void)
 
         printf("%d,%d,%d\r\n", x, y, z);
       }
+      SPI_READ(INT_SOURCE_REG);
+      __HAL_GPIO_EXTI_CLEAR_IT(INT2_Pin);
     }
     else
     {
       printf("[WAIT] No interrupt set.\r\n");
+      printf("INT SOURCE:  0x%02X\r\n", SPI_READ(INT_SOURCE_REG));   // bit 1 set = watermark firing
+      printf("FIFO STATUS: 0x%02X\r\n", SPI_READ(FIFO_STATUS_REG));  // bits 5:0 = entries in FIFO
+      printf("PB5 STATUS: %d\r\n", HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_5));
+      HAL_Delay(100);
     }
     /* USER CODE END WHILE */
 

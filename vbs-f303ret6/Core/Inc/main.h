@@ -60,7 +60,7 @@ void Error_Handler(void);
 #define ADXL1_CS_Pin GPIO_PIN_0
 #define ADXL1_CS_GPIO_Port GPIOA
 #define INT2_Pin GPIO_PIN_5
-#define INT2_GPIO_Port GPIOA
+#define INT2_GPIO_Port GPIOB
 #define INT2_EXTI_IRQn EXTI9_5_IRQn
 
 /* USER CODE BEGIN Private defines */
