@@ -7,7 +7,7 @@ The current implementation of the accelerometer driver is built to support I2C/S
 ## Usage
 
 <img width="480" height="360" alt="thermocouple_driver_wiring" src="https://github.com/liquid-rocketry-illinois/FIS-Vibration-Sensor-Driver/blob/dev/imagery/vbs.jpg"/> <br/>
-The test connections to be made between the STM32H753ZI Nucleo-144 and MCP960 are to be made as follows: <br/>
+The test connections to be made between the STM32F303RET6 and ADXL345 breakout are to be made as follows: <br/>
 <table border="1" style="border-collapse: collapse;">
    <thead>
        <tr>
@@ -43,9 +43,14 @@ The test connections to be made between the STM32H753ZI Nucleo-144 and MCP960 ar
            <td>ORANGE     </td>
        </tr>
        <tr>
-           <td>CS         </td>
+           <td>ADXL CS    </td>
            <td>A0         </td>
            <td>PURPLE     </td>
+       </tr>
+       <tr>
+           <td>INT2       </td>
+           <td>A5         </td>
+           <td>NOT SHOWN  </td>
        </tr>
    </tbody>
 </table>
@@ -64,7 +69,7 @@ The test connections to be made between the STM32H753ZI Nucleo-144 and MCP960 ar
 
 ## Reference
 
-The .ioc enables SPI2, with connections as follows: SPI2_SCK > PF1, SPI_MOSI > PB15, SPI_MISO > PB14. The .ioc also enables 1 GPIO pin, A0, for CS.
+ADXL345 Interface: The .ioc enables SPI2, with connections as follows: SPI2_SCK > PF1, SPI_MOSI > PB15, SPI_MISO > PB14. The .ioc also enables 1 GPIO output pin, PA0, for CS. PA5 is enabled as a GPIO input pin for INT2 (interrupt) from the ADXL.
 
 The .ioc enables USART3 for ST-LINK.
 
