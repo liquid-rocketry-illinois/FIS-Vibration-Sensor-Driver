@@ -21,6 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -223,6 +224,12 @@ void SPI_READ_BURST(uint8_t reg, uint8_t *pData, uint8_t len)
   ADXL1_CS_HIGH();
 }
 
+/*
+ *  Declare variables
+ */
+const     uint16_t  odr    = 3200;      // output data rate
+volatile  uint8_t   fifo_ready  = 0;    // INT2 flag for FIFO watermark
+
 /* USER CODE END 0 */
 
 /**
@@ -257,6 +264,8 @@ int main(void)
   MX_SPI2_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
+  char msg[] = "BOOT\r\n";
+  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
 
   // Initialization and troubleshooting
   ADXL1_CS_HIGH();          // SPI has CS active LOW, default HIGH
@@ -350,32 +359,33 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    const uint16_t odr    = 3200;                   //  output data rate
-    uint8_t fifo_status   = SPI_READ(FIFO_STATUS_REG);
-    uint8_t fifo_entries  = (fifo_status & 0x3F);   //  bitmask of 6 LSB
+    if (1)
+    {
+      HAL_Delay(1000);
+      fifo_ready            = 0;  // clears interrupt flag
+      uint8_t fifo_status   = SPI_READ(FIFO_STATUS_REG);
+      uint8_t fifo_entries  = (fifo_status & 0x3F);   //  bitmask of 6 LSB
 
-    if (fifo_entries >= FIFO_WATERMARK) {
-      uint8_t raw[6];
-      SPI_READ_BURST(DATA_X0_REG, raw, 6);
+      for (uint8_t i = 0; i < fifo_entries; i++)
+      {
+        uint8_t raw[6];
+        SPI_READ_BURST(DATA_X0_REG, raw, 6);
 
-      int16_t x   = (int16_t)(raw[1]<<8 | raw[0]);
-      int16_t y   = (int16_t)(raw[3]<<8 | raw[2]);
-      int16_t z   = (int16_t)(raw[5]<<8 | raw[4]);
+        int16_t x   = (int16_t)(raw[1]<<8 | raw[0]);
+        int16_t y   = (int16_t)(raw[3]<<8 | raw[2]);
+        int16_t z   = (int16_t)(raw[5]<<8 | raw[4]);
 
-      printf("RAW DATA\r\n"
-             "X: %d\r\n"
-             "Y: %d\r\n"
-             "Z: %d\r\n",
-             x, y, z);
+        printf("%d,%d,%d\r\n", x, y, z);
+      }
     }
     else
     {
-      printf("[WAIT] Polling threshold not reached.\r\n");
+      printf("[WAIT] No interrupt set.\r\n");
     }
-    HAL_Delay(1000/odr);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
   }
   /* USER CODE END 3 */
 }
@@ -558,6 +568,20 @@ int __io_putchar(int ch)
 {
   HAL_UART_Transmit(&huart2, (uint8_t*)&ch, 1, HAL_MAX_DELAY);
   return ch;
+}
+
+
+/**
+ *  @brief  Handles interrupt from GPIO pins
+ *
+ *  @param  value from GPIO_Pin
+ */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  if (GPIO_Pin == GPIO_PIN_5)
+  {
+    fifo_ready  = 1;  // sets interrupt flag for FIFO
+  }
 }
 
 /* USER CODE END 4 */
