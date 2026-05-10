@@ -68,7 +68,7 @@
 #define FIFO_STREAM           (0x80)  // 10xx xxxx
 #define FIFO_TRIGGER          (0xC0)  // 11xx xxxx
 
-#define FIFO_WATERMARK        (0x10)  // watermark = #16 (interrupt at 16 FIFO entries)
+#define FIFO_WATERMARK        (0x1F)  // watermark = #31 (interrupt at 16 FIFO entries)
 
 /*
  *  Initialized registers for data formatting and ODR, respectively
@@ -286,7 +286,7 @@ int main(void)
    *  D[7:4]: 0
    *  D[3:0]: RATE BITS (ADXL345 datasheet, Table 7)
    */
-  SPI_WRITE(BW_RATE_REG, 0x0A);   // Sets ODR to 100 Hz (bandwidth 50 Hz), temporary
+  SPI_WRITE(BW_RATE_REG, 0x0C);   // Sets ODR to 400 Hz (bandwidth 200 Hz), temporary
   printf("BW RATE: 0x%02X\r\n", SPI_READ(BW_RATE_REG));
 
   /*
@@ -353,8 +353,15 @@ int main(void)
    */
   SPI_WRITE(INT_ENABLE_REG, 0x02);
   printf("INT ENABLE: 0x%02X\r\n", SPI_READ(INT_ENABLE_REG));
-
   HAL_Delay(1000); // 1-second delay for checking register return values
+
+  uint8_t drain = SPI_READ(FIFO_STATUS_REG) & 0x3F;   // drains FIFO
+  for (uint8_t i = 0; i < drain; i++)
+  {
+    uint8_t dummy[6];
+    SPI_READ_BURST(DATA_X0_REG, dummy, 6);
+  }
+  SPI_READ(INT_SOURCE_REG);                           // clears watermark latch
 
   __HAL_GPIO_EXTI_CLEAR_IT(INT2_Pin);
   fifo_ready = 0;
@@ -511,7 +518,7 @@ static void MX_USART2_UART_Init(void)
 
   /* USER CODE END USART2_Init 1 */
   huart2.Instance = USART2;
-  huart2.Init.BaudRate = 38400;
+  huart2.Init.BaudRate = 115200;
   huart2.Init.WordLength = UART_WORDLENGTH_8B;
   huart2.Init.StopBits = UART_STOPBITS_1;
   huart2.Init.Parity = UART_PARITY_NONE;
