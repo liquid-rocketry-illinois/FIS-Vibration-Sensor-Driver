@@ -68,7 +68,7 @@
 #define FIFO_STREAM           (0x80)  // 10xx xxxx
 #define FIFO_TRIGGER          (0xC0)  // 11xx xxxx
 
-#define FIFO_WATERMARK        (0x1F)  // watermark = #31 (interrupt at 16 FIFO entries)
+#define FIFO_WATERMARK        (0x1F)  // watermark = #31 (interrupt at 31 FIFO entries)
 
 /*
  *  Initialized registers for data formatting and ODR, respectively
@@ -91,6 +91,19 @@
 #define DATA_Y1_REG           (0x35)  // R
 #define DATA_Z0_REG           (0x36)  // R
 #define DATA_Z1_REG           (0x37)  // R
+
+// ODR (output data rates)
+
+#define ODR_3200              (0x0F)
+#define ODR_1600              (0x0E)
+#define ODR_800               (0x0D)
+#define ODR_400               (0x0C)
+#define ODR_200               (0x0B)  // You can see the pattern, realistically we won't be measuring at any ODR < 200
+
+// Other miscellaneous defines
+
+#define MAX_FIFO_ENTRIES      32      // The FIFO register can hold a max of 32 entries.
+#define BYTES_PER_ENTRY       6       // Each entry consists of 2 bytes for each axis X, Y, Z (2*3=6)
 
 // SPI access bitmasks
 
@@ -123,6 +136,13 @@ SPI_HandleTypeDef hspi2;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
+
+/*
+ *  Declare variables
+ */
+const     uint16_t  odr __attribute__((unused)) = 3200;      // output data rate
+volatile  uint8_t   fifo_ready  = 0;    // INT2 flag for FIFO watermark
+
 
 /* USER CODE END PV */
 
@@ -175,6 +195,7 @@ void SPI_WRITE_BURST(uint8_t reg, uint8_t *pData, uint8_t len)
 
   uint8_t tx[len];
   tx[0]     = ((reg & ~ADXL345_RW) | ADXL345_MB);
+  memcpy(&tx[1], pData, len);
   ADXL1_CS_LOW();
   HAL_SPI_Transmit(&hspi2, tx, len, HAL_MAX_DELAY);
   ADXL1_CS_HIGH();
@@ -224,11 +245,18 @@ void SPI_READ_BURST(uint8_t reg, uint8_t *pData, uint8_t len)
   ADXL1_CS_HIGH();
 }
 
-/*
- *  Declare variables
- */
-const     uint16_t  odr    = 3200;      // output data rate
-volatile  uint8_t   fifo_ready  = 0;    // INT2 flag for FIFO watermark
+// clears FIFO
+uint8_t DRAIN_FIFO(void)
+{
+  uint8_t drain = SPI_READ(FIFO_STATUS_REG) & 0x3F;   // drains FIFO
+  for (uint8_t i = 0; i < drain; i++)
+  {
+    uint8_t dummy[6];
+    SPI_READ_BURST(DATA_X0_REG, dummy, 6);
+  }
+  SPI_READ(INT_SOURCE_REG);                           // clears watermark latch
+  return drain;
+}
 
 /* USER CODE END 0 */
 
@@ -286,7 +314,7 @@ int main(void)
    *  D[7:4]: 0
    *  D[3:0]: RATE BITS (ADXL345 datasheet, Table 7)
    */
-  SPI_WRITE(BW_RATE_REG, 0x0C);   // Sets ODR to 400 Hz (bandwidth 200 Hz), temporary
+  SPI_WRITE(BW_RATE_REG, ODR_800);   // Sets ODR to ODR_# Hz (bandwidth #/2 Hz)
   printf("BW RATE: 0x%02X\r\n", SPI_READ(BW_RATE_REG));
 
   /*
@@ -355,14 +383,7 @@ int main(void)
   printf("INT ENABLE: 0x%02X\r\n", SPI_READ(INT_ENABLE_REG));
   HAL_Delay(1000); // 1-second delay for checking register return values
 
-  uint8_t drain = SPI_READ(FIFO_STATUS_REG) & 0x3F;   // drains FIFO
-  for (uint8_t i = 0; i < drain; i++)
-  {
-    uint8_t dummy[6];
-    SPI_READ_BURST(DATA_X0_REG, dummy, 6);
-  }
-  SPI_READ(INT_SOURCE_REG);                           // clears watermark latch
-
+  printf("[INIT] Drained %d stale FIFO entries\r\n", DRAIN_FIFO());
   __HAL_GPIO_EXTI_CLEAR_IT(INT2_Pin);
   fifo_ready = 0;
   /* USER CODE END 2 */
@@ -371,24 +392,24 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    uint8_t raw[MAX_FIFO_ENTRIES * BYTES_PER_ENTRY];  // 192 bytes
     if (fifo_ready)
     {
-      printf("[FIFO] Detected interrupt.\r\n");
-      fifo_ready            = 0;  // clears interrupt flag
-      uint8_t fifo_status   = SPI_READ(FIFO_STATUS_REG);
-      uint8_t fifo_entries  = (fifo_status & 0x3F);     //  bitmask of 6 LSB
+      fifo_ready = 0;
+      uint8_t entries = SPI_READ(FIFO_STATUS_REG) & 0x3F;
 
-      for (uint8_t i = 0; i < fifo_entries; i++)
+      /* Single burst read of all entries at once */
+      SPI_READ_BURST(DATA_X0_REG, raw, entries * BYTES_PER_ENTRY);
+
+      for (uint8_t i = 0; i < entries; i++)
       {
-        uint8_t raw[6];
-        SPI_READ_BURST(DATA_X0_REG, raw, 6);
-
-        int16_t x   = (int16_t)(raw[1]<<8 | raw[0]);
-        int16_t y   = (int16_t)(raw[3]<<8 | raw[2]);
-        int16_t z   = (int16_t)(raw[5]<<8 | raw[4]);
-
+        uint8_t *s  = &raw[i * BYTES_PER_ENTRY];
+        int16_t x   = (int16_t)(s[1]<<8 | s[0]);
+        int16_t y   = (int16_t)(s[3]<<8 | s[2]);
+        int16_t z   = (int16_t)(s[5]<<8 | s[4]);
         printf("%d,%d,%d\r\n", x, y, z);
       }
+
       SPI_READ(INT_SOURCE_REG);
       __HAL_GPIO_EXTI_CLEAR_IT(INT2_Pin);
     }
