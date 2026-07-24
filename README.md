@@ -49,7 +49,7 @@ The test connections to be made between the STM32F303RET6 and ADXL345 breakout a
        </tr>
        <tr>
            <td>INT2       </td>
-           <td>A5         </td>
+           <td>B5 (D4)    </td>
            <td>NOT SHOWN  </td>
        </tr>
    </tbody>
