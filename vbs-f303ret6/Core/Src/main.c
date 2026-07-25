@@ -18,6 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "fatfs.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -132,6 +133,9 @@
 
 /* Private variables ---------------------------------------------------------*/
 SPI_HandleTypeDef hspi2;
+SPI_HandleTypeDef hspi3;
+DMA_HandleTypeDef hdma_spi2_rx;
+DMA_HandleTypeDef hdma_spi2_tx;
 
 UART_HandleTypeDef huart2;
 
@@ -141,16 +145,21 @@ UART_HandleTypeDef huart2;
  *  Declare variables
  */
 const     uint16_t  odr __attribute__((unused)) = 3200;      // output data rate
-volatile  uint8_t   fifo_ready  = 0;    // INT2 flag for FIFO watermark
+volatile  uint8_t   fifo_ready    = 0;      // INT2 flag for FIFO watermark
+volatile  uint8_t   dma_complete  = 0;      // DMA transfer complete flag
+volatile  uint8_t   dma_entries   = 0;      // how many entries DMA is reading
 
+static uint8_t raw[MAX_FIFO_ENTRIES * BYTES_PER_ENTRY];  // 192 bytes global DMA buffer
 
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_SPI2_Init(void);
 static void MX_USART2_UART_Init(void);
+static void MX_SPI3_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -245,6 +254,24 @@ void SPI_READ_BURST(uint8_t reg, uint8_t *pData, uint8_t len)
   ADXL1_CS_HIGH();
 }
 
+/**
+  *  @brief   Start a non-blocking DMA burst read from ADXL345 FIFO
+  *
+  *  @note    CS stays LOW until HAL_SPI_RxCpltCallback raises it
+  *  @param   pData  pointer to destination buffer
+  *  @param   len    number of bytes to receive
+  */
+void SPI_READ_BURST_DMA(uint8_t *pData, uint8_t len)
+{
+  static uint8_t tx_addr;   // static so it persists after function returns
+  tx_addr = (DATA_X0_REG | ADXL345_RW | ADXL345_MB);
+
+  ADXL1_CS_LOW();
+  HAL_SPI_Transmit(&hspi2, &tx_addr, 1, HAL_MAX_DELAY);   // send address
+  HAL_SPI_Receive_DMA(&hspi2, pData, len);                            // DMA takes over
+  /* NOTE!! CS goes HIGH in HAL_SPI_RxCpltCallback */
+}
+
 // clears FIFO
 uint8_t DRAIN_FIFO(void)
 {
@@ -289,8 +316,11 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_SPI2_Init();
   MX_USART2_UART_Init();
+  MX_FATFS_Init();
+  MX_SPI3_Init();
   /* USER CODE BEGIN 2 */
   char msg[] = "[BOOT]\r\n";
   HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
@@ -314,7 +344,7 @@ int main(void)
    *  D[7:4]: 0
    *  D[3:0]: RATE BITS (ADXL345 datasheet, Table 7)
    */
-  SPI_WRITE(BW_RATE_REG, ODR_800);   // Sets ODR to ODR_# Hz (bandwidth #/2 Hz)
+  SPI_WRITE(BW_RATE_REG, ODR_1600);   // Sets ODR to ODR_# Hz (bandwidth #/2 Hz)
   printf("BW RATE: 0x%02X\r\n", SPI_READ(BW_RATE_REG));
 
   /*
@@ -392,34 +422,40 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    uint8_t raw[MAX_FIFO_ENTRIES * BYTES_PER_ENTRY];  // 192 bytes
     if (fifo_ready)
     {
-      fifo_ready = 0;
-      uint8_t entries = SPI_READ(FIFO_STATUS_REG) & 0x3F;
+      fifo_ready   = 0;
+      dma_complete = 0;
 
-      /* Single burst read of all entries at once */
-      SPI_READ_BURST(DATA_X0_REG, raw, entries * BYTES_PER_ENTRY);
+      // Read entry count before starting DMA
+      dma_entries = SPI_READ(FIFO_STATUS_REG) & 0x3F;
 
-      for (uint8_t i = 0; i < entries; i++)
+      if (dma_entries > 0)
       {
-        uint8_t *s  = &raw[i * BYTES_PER_ENTRY];
-        int16_t x   = (int16_t)(s[1]<<8 | s[0]);
-        int16_t y   = (int16_t)(s[3]<<8 | s[2]);
-        int16_t z   = (int16_t)(s[5]<<8 | s[4]);
-        printf("%d,%d,%d\r\n", x, y, z);
-      }
+        SPI_READ_BURST_DMA(raw, dma_entries * BYTES_PER_ENTRY);
 
-      SPI_READ(INT_SOURCE_REG);
-      __HAL_GPIO_EXTI_CLEAR_IT(INT2_Pin);
-    }
-    else
-    {
-      printf("[WAIT] No interrupt set.\r\n");
-      printf("INT SOURCE:  0x%02X\r\n", SPI_READ(INT_SOURCE_REG));   // bit 1 set = watermark firing
-      printf("FIFO STATUS: 0x%02X\r\n", SPI_READ(FIFO_STATUS_REG));  // bits 5:0 = entries in FIFO
-      printf("PB5 STATUS: %d\r\n", HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_5));
-      HAL_Delay(100);
+        while (!dma_complete);
+        // DEBUGGING PURPOSES ONLY, READS FIRST XYZ ENTRY IN BLOCK
+        int16_t dbg_x = (int16_t)(raw[1]<<8 | raw[0]);
+        int16_t dbg_y = (int16_t)(raw[3]<<8 | raw[2]);
+        int16_t dbg_z = (int16_t)(raw[5]<<8 | raw[4]);
+        printf("[DEBUG] ENTRIES=%d  FIRST: x=%d y=%d z=%d\r\n",
+               dma_entries, dbg_x, dbg_y, dbg_z);
+
+        /* UNCOMMENT IF WANT TO PRINT EACH ENTRY
+        for (uint8_t i = 0; i < dma_entries; i++)
+        {
+          uint8_t *s  = &raw[i * BYTES_PER_ENTRY];
+          int16_t x   = (int16_t)(s[1]<<8 | s[0]);
+          int16_t y   = (int16_t)(s[3]<<8 | s[2]);
+          int16_t z   = (int16_t)(s[5]<<8 | s[4]);
+          printf("%d,%d,%d\r\n", x, y, z);
+        }
+        */
+
+        SPI_READ(INT_SOURCE_REG);
+        __HAL_GPIO_EXTI_CLEAR_IT(INT2_Pin);
+      }
     }
     /* USER CODE END WHILE */
 
@@ -524,6 +560,46 @@ static void MX_SPI2_Init(void)
 }
 
 /**
+  * @brief SPI3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_SPI3_Init(void)
+{
+
+  /* USER CODE BEGIN SPI3_Init 0 */
+
+  /* USER CODE END SPI3_Init 0 */
+
+  /* USER CODE BEGIN SPI3_Init 1 */
+
+  /* USER CODE END SPI3_Init 1 */
+  /* SPI3 parameter configuration*/
+  hspi3.Instance = SPI3;
+  hspi3.Init.Mode = SPI_MODE_MASTER;
+  hspi3.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi3.Init.DataSize = SPI_DATASIZE_4BIT;
+  hspi3.Init.CLKPolarity = SPI_POLARITY_LOW;
+  hspi3.Init.CLKPhase = SPI_PHASE_1EDGE;
+  hspi3.Init.NSS = SPI_NSS_SOFT;
+  hspi3.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+  hspi3.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi3.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi3.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi3.Init.CRCPolynomial = 7;
+  hspi3.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
+  hspi3.Init.NSSPMode = SPI_NSS_PULSE_ENABLE;
+  if (HAL_SPI_Init(&hspi3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN SPI3_Init 2 */
+
+  /* USER CODE END SPI3_Init 2 */
+
+}
+
+/**
   * @brief USART2 Initialization Function
   * @param None
   * @retval None
@@ -559,6 +635,25 @@ static void MX_USART2_UART_Init(void)
 }
 
 /**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Channel4_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel4_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel4_IRQn);
+  /* DMA1_Channel5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel5_IRQn);
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -574,6 +669,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, ADXL1_CS_Pin|GPIO_PIN_1, GPIO_PIN_RESET);
@@ -620,6 +716,15 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   if (GPIO_Pin == GPIO_PIN_5)
   {
     fifo_ready  = 1;  // sets interrupt flag for FIFO
+  }
+}
+
+void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi)
+{
+  if (hspi->Instance == SPI2)
+  {
+    ADXL1_CS_HIGH();    // deassert CS
+    dma_complete = 1;   // signal main loop
   }
 }
 
