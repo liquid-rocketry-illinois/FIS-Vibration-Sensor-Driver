@@ -202,11 +202,11 @@ void SPI_WRITE_BURST(uint8_t reg, uint8_t *pData, uint8_t len)
    *  rx[7:0] = Data bits
    */
 
-  uint8_t tx[len];
+  uint8_t tx[len+1];
   tx[0]     = ((reg & ~ADXL345_RW) | ADXL345_MB);
   memcpy(&tx[1], pData, len);
   ADXL1_CS_LOW();
-  HAL_SPI_Transmit(&hspi2, tx, len, HAL_MAX_DELAY);
+  HAL_SPI_Transmit(&hspi2, tx, len+1, HAL_MAX_DELAY);
   ADXL1_CS_HIGH();
 }
 
