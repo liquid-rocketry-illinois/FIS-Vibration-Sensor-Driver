@@ -89,6 +89,7 @@ void FATFS_Test()
 
   printf("\r\n FatFS Test \r\n");
 
+  /* Can FatFS successfully mount the filesystem on the SD card? */
   fres = f_mount(&fs, "", 1);
   if (fres != FR_OK)
   {
@@ -96,17 +97,18 @@ void FATFS_Test()
     /* If the card is unformatted, try f_mkfs() first or reformat as FAT32 on a PC manually */
     return;
   }
-
   printf("f_mount successful!\r\n");
   const char wbuf[] = "SD card Test (from STM32)\r\n";
 
+  /* Can FatFS create a file on the SD card? */
   fres = f_open(&fil, "test.txt", FA_CREATE_ALWAYS | FA_WRITE);
   if (fres != FR_OK)
   {
-    printf("FAIL: f_open returned FRESULT %d\r\n", fres);
+    printf("FAIL: f_open (create) returned FRESULT %d\r\n", fres);
     return;
   }
 
+  /* Can FatFS write to a file on the SD card? */
   fres = f_write(&fil, wbuf, strlen(wbuf), &bw);
   f_close(&fil);
   if (fres != FR_OK || bw != strlen(wbuf))
@@ -114,15 +116,52 @@ void FATFS_Test()
     printf("FAIL: f_write returned %d, wrote %u/%u bytes\r\n", fres, bw, (unsigned)strlen(wbuf));
     return;
   }
-  printf("FAIL: Wrote %u bytes to test.txt\r\n", bw);
+  printf("Wrote %u bytes to test.txt\r\n", bw);
 
+  /* Can FatFS reopen the existing file and read data correctly? */
   char rbuf[64] = {0};
   fres = f_open(&fil, "test.txt", FA_READ);
   if (fres != FR_OK)
   {
-    printf("FAIL: f_open returned FRESULT %d\r\n", fres);
+    printf("FAIL: f_open (read) returned FRESULT %d\r\n", fres);
     return;
   }
+  fres = f_read(&fil, rbuf, sizeof(rbuf) - 1, &br);
+  f_close(&fil);
+  if (fres != FR_OK)
+  {
+    printf("FAIL: f_read() returned FRESULT %d\r\n", fres);
+    return;
+  }
+
+  /* Compare what was input into the file to what we got back. */
+  rbuf[br] = '\0';
+  printf("Read back %u bytes: \"%s\"", br, rbuf);
+  if (strncmp(wbuf, rbuf, strlen(wbuf)) == 0)
+  {
+    printf("PASS: readback matches that was written\r\n");
+  }
+  else
+  {
+    printf("FAIL: readback doesn't match what was written\r\n");
+  }
+
+  /* Check if free-space reporting works. */
+  FATFS *pfs;
+  DWORD free_clusters;
+  fres = f_getfree("", &free_clusters, &pfs);
+  if (fres == FR_OK)
+  {
+    DWORD free_kb = (free_clusters * pfs->csize) / 2;
+    printf("Free Space: %lu KB \r\n", free_kb);
+  }
+  else
+  {
+    printf("FAIL: f_getfree() returned FRESULT %d\r\n", fres);
+  }
+
+  printf("Test Complete");
+
 }
 
 void MX_FATFS_Init(void)
