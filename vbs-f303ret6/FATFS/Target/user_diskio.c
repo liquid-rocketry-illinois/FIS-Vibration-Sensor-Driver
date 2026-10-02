@@ -16,6 +16,8 @@
 #include <stdio.h>
 #include "main.h"   /* for hspi3 handle + GPIO defines */
 
+/** This code just defines functions, run main.c for main loop **/
+
 extern SPI_HandleTypeDef hspi3;
 
 /* SD card CS -- adjust port/pin if yours differ */

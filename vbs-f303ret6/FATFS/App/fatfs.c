@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <string.h>
 
+/** This code just defines functions, run main.c for main loop **/
 
 uint8_t retUSER;    /* Return value for USER */
 char USERPath[4];   /* USER logical drive path */
