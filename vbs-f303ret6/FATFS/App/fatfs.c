@@ -31,7 +31,7 @@ FIL USERFile;       /* File object for USER */
 
 /* USER CODE END Variables */
 
-/* Isolates SD-over-SPI driver (disk_write for diskio.c) from any FatFS layer action. */
+/* Isolates SD-over-SPI driver (disk_write for diskio.c) from any FatFS layer activity */
 void Diskio_Test(void)
 {
   printf("\r\nRaw Driver Test\r\n");
@@ -77,10 +77,12 @@ void Diskio_Test(void)
   {
     printf("FAIL: No 0x55AA signature found (card may be unformatted)\r\n");
   }
+
+  printf("Disk Test Complete");
 }
 
 /* Tests FatFS interface itself */
-void FATFS_Test()
+void FATFS_Test(void)
 {
   static FATFS fs;
   static FIL fil;
@@ -90,7 +92,7 @@ void FATFS_Test()
   printf("\r\n FatFS Test \r\n");
 
   /* Can FatFS successfully mount the filesystem on the SD card? */
-  fres = f_mount(&fs, "", 1);
+  fres = f_mount(&fs, "0:", 1);
   if (fres != FR_OK)
   {
     printf("FAIL: f_mount() returned FResult %d\r\n", fres);
@@ -134,7 +136,7 @@ void FATFS_Test()
     return;
   }
 
-  /* Compare what was input into the file to what we got back. */
+  /* Compare what was input into the file to what we got back */
   rbuf[br] = '\0';
   printf("Read back %u bytes: \"%s\"", br, rbuf);
   if (strncmp(wbuf, rbuf, strlen(wbuf)) == 0)
@@ -146,7 +148,7 @@ void FATFS_Test()
     printf("FAIL: readback doesn't match what was written\r\n");
   }
 
-  /* Check if free-space reporting works. */
+  /* Check if free-space reporting works */
   FATFS *pfs;
   DWORD free_clusters;
   fres = f_getfree("", &free_clusters, &pfs);
