@@ -33,7 +33,10 @@ enable_language(C ASM)
 
 # Create an executable object type
 add_executable(${CMAKE_PROJECT_NAME}
-        FATFS/App/fatfs.c)
+        FATFS/App/fatfs.c
+        FATFS/Target/logging.c
+        FATFS/Target/logging.h
+)
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)

@@ -291,7 +291,6 @@ uint8_t DRAIN_FIFO(void)
   * @brief  The application entry point.
   * @retval int
   */
-
 int main(void)
 {
 
@@ -421,40 +420,13 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  /**
   while (1)
   {
-    if (fifo_ready)
-    {
-      fifo_ready   = 0;
-      dma_complete = 0;
+    /* USER CODE END WHILE */
 
-      // Read entry count before starting DMA
-      dma_entries = SPI_READ(FIFO_STATUS_REG) & 0x3F;
-
-      if (dma_entries > 0)
-      {
-        SPI_READ_BURST_DMA(raw, dma_entries * BYTES_PER_ENTRY);
-
-        while (!dma_complete);
-        // DEBUGGING PURPOSES ONLY, READS FIRST XYZ ENTRY IN BLOCK
-        int16_t dbg_x = (int16_t)(raw[1]<<8 | raw[0]);
-        int16_t dbg_y = (int16_t)(raw[3]<<8 | raw[2]);
-        int16_t dbg_z = (int16_t)(raw[5]<<8 | raw[4]);
-        printf("[DEBUG] ENTRIES=%d  FIRST: x=%d y=%d z=%d\r\n",
-               dma_entries, dbg_x, dbg_y, dbg_z);
-
-        SPI_READ(INT_SOURCE_REG);
-        __HAL_GPIO_EXTI_CLEAR_IT(INT2_Pin);
-      }
-    }
-  } */
-
-  printf("\x1B[1;1H\x1B[2J");
-  /* this first print statement literally just clears the terminal */
-  printf("main init\r\n");
-  Diskio_Test();
-  FATFS_Test();
+    /* USER CODE BEGIN 3 */
+  }
+  /* USER CODE END 3 */
 }
 
 /**
@@ -530,7 +502,7 @@ static void MX_SPI2_Init(void)
   hspi2.Instance = SPI2;
   hspi2.Init.Mode = SPI_MODE_MASTER;
   hspi2.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi2.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi2.Init.DataSize = SPI_DATASIZE_4BIT;
   hspi2.Init.CLKPolarity = SPI_POLARITY_HIGH;
   hspi2.Init.CLKPhase = SPI_PHASE_2EDGE;
   hspi2.Init.NSS = SPI_NSS_SOFT;
@@ -570,17 +542,17 @@ static void MX_SPI3_Init(void)
   hspi3.Instance = SPI3;
   hspi3.Init.Mode = SPI_MODE_MASTER;
   hspi3.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi3.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi3.Init.DataSize = SPI_DATASIZE_4BIT;
   hspi3.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi3.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi3.Init.NSS = SPI_NSS_SOFT;
-  hspi3.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_256;
+  hspi3.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
   hspi3.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi3.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi3.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
   hspi3.Init.CRCPolynomial = 7;
   hspi3.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
-  hspi3.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
+  hspi3.Init.NSSPMode = SPI_NSS_PULSE_ENABLE;
   if (HAL_SPI_Init(&hspi3) != HAL_OK)
   {
     Error_Handler();

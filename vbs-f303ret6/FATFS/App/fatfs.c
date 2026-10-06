@@ -17,11 +17,6 @@
   */
 /* USER CODE END Header */
 #include "fatfs.h"
-#include "diskio.h"
-#include <stdio.h>
-#include <string.h>
-
-/** This code just defines functions, run main.c for main loop **/
 
 uint8_t retUSER;    /* Return value for USER */
 char USERPath[4];   /* USER logical drive path */
@@ -30,12 +25,27 @@ FIL USERFile;       /* File object for USER */
 
 /* USER CODE BEGIN Variables */
 
+#include "fatfs.h"
+#include "diskio.h"
+#include <stdio.h>
+#include <string.h>
+
+uint8_t retUSER;    /* Return value for USER */
+char USERPath[4];   /* USER logical drive path */
+FATFS USERFatFS;    /* File system object for USER logical drive */
+FIL USERFile;       /* File object for USER */
+
 /* USER CODE END Variables */
 
-/* Isolates SD-over-SPI driver (disk_write for diskio.c) from any FatFS layer activity */
-void Diskio_Test(void)
+void MX_FATFS_Init(void)
 {
-  printf("\r\nRaw Driver Test\r\n");
+  /*## FatFS: Link the USER driver ###########################*/
+  retUSER = FATFS_LinkDriver(&USER_Driver, USERPath);
+
+  /* USER CODE BEGIN Init */
+
+  // Isolates SD-over-SPI driver (disk_write for diskio.c) from any FatFS layer activity
+  printf("\r\n Raw Driver Disk Test \r\n");
 
   /* Does the disk initialize in the first place? */
   DSTATUS stat = disk_initialize(0);
@@ -79,12 +89,9 @@ void Diskio_Test(void)
     printf("FAIL: No 0x55AA signature found (card may be unformatted)\r\n");
   }
 
-  printf("Disk Test Complete");
-}
+  printf("\r\n Disk Test Complete \r\n");
 
-/* Tests FatFS interface itself */
-void FATFS_Test(void)
-{
+  // Tests FatFS interface itself
   static FATFS fs;
   static FIL fil;
   FRESULT fres;
@@ -163,17 +170,8 @@ void FATFS_Test(void)
     printf("FAIL: f_getfree() returned FRESULT %d\r\n", fres);
   }
 
-  printf("Test Complete");
+  printf("\r\n FATFS Test Complete \r\n");
 
-}
-
-void MX_FATFS_Init(void)
-{
-  /*## FatFS: Link the USER driver ###########################*/
-  retUSER = FATFS_LinkDriver(&USER_Driver, USERPath);
-
-  /* USER CODE BEGIN Init */
-  /* additional user code for init */
   /* USER CODE END Init */
 }
 
