@@ -25,6 +25,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include "initialization.h"
 
 /* USER CODE END Includes */
 
@@ -140,6 +141,8 @@ DMA_HandleTypeDef hdma_spi2_tx;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
+
+static FIL log_file;
 
 /*
  *  Declare variables
@@ -295,7 +298,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
+  setvbuf(stdout, NULL, _IONBF, 0);
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -416,15 +419,71 @@ int main(void)
   printf("[INIT] Drained %d stale FIFO entries\r\n", DRAIN_FIFO());
   __HAL_GPIO_EXTI_CLEAR_IT(INT2_Pin);
   fifo_ready = 0;
+
+  Diskio_Init();
+  FatFS_Init();
+
+  FRESULT fr = f_open(&log_file, "log000.bin", FA_CREATE_ALWAYS | FA_WRITE);
+  if (fr != FR_OK) {
+    printf("[LOG] f_open failed: %d\r\n", fr);
+    Error_Handler();
+  }
+
+  CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+  DWT->CYCCNT = 0;
+  DWT->CTRL  |= DWT_CTRL_CYCCNTENA_Msk;
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    if (fifo_ready)
+    {
+      fifo_ready   = 0;
+      dma_complete = 0;
+
+      // Read entry count before starting DMA
+      dma_entries = SPI_READ(FIFO_STATUS_REG) & 0x3F;
+
+      if (dma_entries > 0)
+      {
+        SPI_READ_BURST_DMA(raw, dma_entries * BYTES_PER_ENTRY);
+
+        while (!dma_complete);
+
+        // Preliminary writing test 2
+
+        uint32_t t_us = DWT->CYCCNT / (SystemCoreClock / 1000000UL);
+
+        /* header (5 bytes) + up to 32 samples * 6 bytes = 197 bytes max */
+        uint8_t chunk_buf[5 + 32 * 6];
+
+        chunk_buf[0] = (uint8_t)(t_us >> 24);
+        chunk_buf[1] = (uint8_t)(t_us >> 16);
+        chunk_buf[2] = (uint8_t)(t_us >> 8);
+        chunk_buf[3] = (uint8_t)(t_us);
+        chunk_buf[4] = dma_entries;
+
+        memcpy(&chunk_buf[5], raw, dma_entries * 6);
+
+        UINT bw;
+        UINT to_write = 5 + dma_entries * 6;
+        FRESULT fr = f_write(&log_file, chunk_buf, to_write, &bw);
+        if (fr != FR_OK || bw != to_write) {
+          printf("[LOG] FAIL: f_write returned %d, wrote %u/%u bytes\r\n",
+                 fr, bw, (unsigned)to_write);
+        }
+
+
+        SPI_READ(INT_SOURCE_REG);
+        __HAL_GPIO_EXTI_CLEAR_IT(INT2_Pin);
+      }
+    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
   }
   /* USER CODE END 3 */
 }
@@ -502,7 +561,7 @@ static void MX_SPI2_Init(void)
   hspi2.Instance = SPI2;
   hspi2.Init.Mode = SPI_MODE_MASTER;
   hspi2.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi2.Init.DataSize = SPI_DATASIZE_4BIT;
+  hspi2.Init.DataSize = SPI_DATASIZE_8BIT;
   hspi2.Init.CLKPolarity = SPI_POLARITY_HIGH;
   hspi2.Init.CLKPhase = SPI_PHASE_2EDGE;
   hspi2.Init.NSS = SPI_NSS_SOFT;
@@ -518,7 +577,8 @@ static void MX_SPI2_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN SPI2_Init 2 */
-
+  hspi2.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi2.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
   /* USER CODE END SPI2_Init 2 */
 
 }
@@ -542,7 +602,7 @@ static void MX_SPI3_Init(void)
   hspi3.Instance = SPI3;
   hspi3.Init.Mode = SPI_MODE_MASTER;
   hspi3.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi3.Init.DataSize = SPI_DATASIZE_4BIT;
+  hspi3.Init.DataSize = SPI_DATASIZE_8BIT;
   hspi3.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi3.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi3.Init.NSS = SPI_NSS_SOFT;
@@ -552,13 +612,14 @@ static void MX_SPI3_Init(void)
   hspi3.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
   hspi3.Init.CRCPolynomial = 7;
   hspi3.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
-  hspi3.Init.NSSPMode = SPI_NSS_PULSE_ENABLE;
+  hspi3.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
   if (HAL_SPI_Init(&hspi3) != HAL_OK)
   {
     Error_Handler();
   }
   /* USER CODE BEGIN SPI3_Init 2 */
-
+  hspi3.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi3.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
   /* USER CODE END SPI3_Init 2 */
 
 }

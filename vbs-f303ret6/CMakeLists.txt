@@ -36,6 +36,8 @@ add_executable(${CMAKE_PROJECT_NAME}
         FATFS/App/fatfs.c
         FATFS/Target/logging.c
         FATFS/Target/logging.h
+        FATFS/App/initialization.c
+        FATFS/App/initialization.h
 )
 
 # Add STM32CubeMX generated sources

@@ -164,19 +164,6 @@ DRESULT USER_read (BYTE pdrv, BYTE *buff, DWORD sector, UINT count);
   DRESULT USER_ioctl (BYTE pdrv, BYTE cmd, void *buff);
 #endif /* _USE_IOCTL == 1 */
 
-Diskio_drvTypeDef  USER_Driver =
-{
-  USER_initialize,
-  USER_status,
-  USER_read,
-#if  _USE_WRITE
-  USER_write,
-#endif  /* _USE_WRITE == 1 */
-#if  _USE_IOCTL == 1
-  USER_ioctl,
-#endif /* _USE_IOCTL == 1 */
-};
-
 /* Private functions ---------------------------------------------------------*/
 
 /**
@@ -301,13 +288,16 @@ DRESULT USER_read (
     while (count--) {
         SD_CS_LOW();
         uint8_t r1 = SD_SendCmd(CMD17, addr);
+        printf("[SD READ] CMD17 addr=%lu r1=0x%02X\r\n", addr, r1);
         if (r1 != 0x00) {
             SD_CS_HIGH();
             SD_SPI_TxRx(0xFF);
             return RES_ERROR;
         }
 
-        if (SD_WaitToken(DATA_TOKEN_SINGLE, 200) != DATA_TOKEN_SINGLE) {
+        uint8_t token = SD_WaitToken(DATA_TOKEN_SINGLE, 200);
+        printf("[SD READ] data token=0x%02X\r\n", token);
+        if (token != DATA_TOKEN_SINGLE) {
             SD_CS_HIGH();
             SD_SPI_TxRx(0xFF);
             return RES_ERROR;   /* card never sent the data-start token */
@@ -368,6 +358,7 @@ DRESULT USER_write (
         SD_SPI_TxRx(0xFF);
 
         uint8_t resp = SD_SPI_TxRx(0xFF);
+        printf("[SD WRITE] data response token=0x%02X\r\n", resp);
         if ((resp & DATA_RESP_MASK) != DATA_RESP_ACCEPTED) {
             SD_CS_HIGH();
             SD_SPI_TxRx(0xFF);
