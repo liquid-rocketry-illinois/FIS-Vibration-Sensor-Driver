@@ -74,6 +74,25 @@ void Diskio_Init(void)
     printf("FAIL: No 0x55AA signature found (card may be unformatted)\r\n");
   }
 
+  /* Raw write/readback test -- far from boot sector/FAT/root dir, safe to scribble on */
+  static BYTE write_test_buf[512];
+  static BYTE readback_buf[512];
+  DWORD test_sector = 900000;   /* well within your 974848 total, far from metadata */
+
+  memset(write_test_buf, 0xA5, sizeof(write_test_buf));  /* recognizable pattern */
+
+  DRESULT wr = disk_write(0, write_test_buf, test_sector, 1);
+  printf("disk_write(sector %lu) returned %d\r\n", test_sector, wr);
+
+  if (wr == RES_OK) {
+    DRESULT rd = disk_read(0, readback_buf, test_sector, 1);
+    if (rd == RES_OK && memcmp(write_test_buf, readback_buf, 512) == 0) {
+      printf("PASS: raw write/readback round-trip matches\r\n");
+    } else {
+      printf("FAIL: readback mismatch (rd=%d)\r\n", rd);
+    }
+  }
+
   printf("Disk Test Complete");
 }
 
@@ -96,10 +115,15 @@ void FatFS_Init(void)
     return;
   }
   printf("f_mount successful!\r\n");
+
+  printf("[FS] fs_type=%u csize=%u n_fatent=%lu dirbase=%lu database=%lu\r\n",
+       fs.fs_type, fs.csize, (unsigned long)fs.n_fatent,
+       (unsigned long)fs.dirbase, (unsigned long)fs.database);
+
   const char wbuf[] = "SD card Test (from STM32)\r\n";
 
   /* Can FatFS create a file on the SD card? */
-  fres = f_open(&fil, "test.txt", FA_CREATE_ALWAYS | FA_WRITE);
+  fres = f_open(&fil, "log004.txt", FA_CREATE_ALWAYS | FA_WRITE);
   if (fres != FR_OK)
   {
     printf("FAIL: f_open (create) returned FRESULT %d\r\n", fres);
@@ -118,7 +142,7 @@ void FatFS_Init(void)
 
   /* Can FatFS reopen the existing file and read data correctly? */
   char rbuf[64] = {0};
-  fres = f_open(&fil, "test.txt", FA_READ);
+  fres = f_open(&fil, "log004.txt", FA_READ);
   if (fres != FR_OK)
   {
     printf("FAIL: f_open (read) returned FRESULT %d\r\n", fres);

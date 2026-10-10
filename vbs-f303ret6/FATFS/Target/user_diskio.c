@@ -344,6 +344,7 @@ DRESULT USER_write (
     while (count--) {
         SD_CS_LOW();
         uint8_t r1 = SD_SendCmd(CMD24, addr);
+        printf("[SD WRITE] CMD24 addr=%lu r1=0x%02X\r\n", addr, r1);
         if (r1 != 0x00) {
             SD_CS_HIGH();
             SD_SPI_TxRx(0xFF);
@@ -397,6 +398,7 @@ DRESULT USER_ioctl (
 )
 {
   /* USER CODE BEGIN IOCTL */
+    printf("[SD IOCTL] pdrv=%u cmd=%u\r\n", pdrv, cmd);
     if (pdrv != 0) return RES_PARERR;
     if (Stat & STA_NOINIT) return RES_NOTRDY;
 

@@ -423,7 +423,7 @@ int main(void)
   Diskio_Init();
   FatFS_Init();
 
-  FRESULT fr = f_open(&log_file, "log000.bin", FA_CREATE_ALWAYS | FA_WRITE);
+  FRESULT fr = f_open(&log_file, "log005.txt", FA_CREATE_ALWAYS | FA_WRITE);
   if (fr != FR_OK) {
     printf("[LOG] f_open failed: %d\r\n", fr);
     Error_Handler();
