@@ -7,6 +7,16 @@
 extern "C" {
 #endif
 
+void LOGGING_INIT(void);
+
+void LOGGING_ADD_SAMPLES(const uint8_t *raw, uint8_t entries);
+
+void LOGGING_TASK(void);
+
+void LOGGING_END(void);
+
+uint32_t LOGGING_GET_OVERFLOW_COUNT(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -215,3 +215,8 @@ void LOGGING_END(void)
     f_truncate(&log_file);
     f_close(&log_file);
 }
+
+uint32_t LOGGING_GET_OVERFLOW_COUNT(void)
+{
+    return overflow_count;
+}

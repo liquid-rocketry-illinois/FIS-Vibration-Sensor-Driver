@@ -5,14 +5,8 @@
 extern "C" {
 #endif
 
-/**
- * @brief  Low-level diskio test.
- */
 void DISKIO_INIT(void);
 
-/**
- * @brief  FatFs-level test.
- */
 void FATFS_INIT(void);
 
 #ifdef __cplusplus
