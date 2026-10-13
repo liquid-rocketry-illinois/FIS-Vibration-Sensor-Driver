@@ -154,12 +154,17 @@ static uint8_t SD_SendCmd(uint8_t cmd, uint32_t arg)
 /* USER CODE END DECL */
 
 /* Private function prototypes -----------------------------------------------*/
+
 DSTATUS USER_initialize (BYTE pdrv);
+
 DSTATUS USER_status (BYTE pdrv);
+
 DRESULT USER_read (BYTE pdrv, BYTE *buff, DWORD sector, UINT count);
+
 #if _USE_WRITE == 1
   DRESULT USER_write (BYTE pdrv, const BYTE *buff, DWORD sector, UINT count);
 #endif /* _USE_WRITE == 1 */
+
 #if _USE_IOCTL == 1
   DRESULT USER_ioctl (BYTE pdrv, BYTE cmd, void *buff);
 #endif /* _USE_IOCTL == 1 */
@@ -221,6 +226,12 @@ DSTATUS USER_initialize (
 
         SD_CS_LOW();
         r1 = SD_SendCmd(ACMD41, is_v2 ? 0x40000000UL : 0);
+        if (CardType == 1) {
+            SD_CS_LOW();
+            SD_SendCmd(16, 512);   // SET_BLOCKLEN
+            SD_CS_HIGH();
+            SD_SPI_TxRx(0xFF);
+        }
         SD_CS_HIGH();
         SD_SPI_TxRx(0xFF);
     } while (r1 != 0x00 && --retry);
@@ -253,12 +264,13 @@ DSTATUS USER_initialize (
   * @param  pdrv: Physical drive number (0..)
   * @retval DSTATUS: Operation status
   */
-DSTATUS USER_status (
-	BYTE pdrv       /* Physical drive number to identify the drive */
-)
+DSTATUS USER_status (BYTE pdrv)
 {
   /* USER CODE BEGIN STATUS */
-    Stat = STA_NOINIT;
+    if (pdrv != 0)
+    {
+        return STA_NOINIT;
+    }
     return Stat;
   /* USER CODE END STATUS */
 }
@@ -288,7 +300,7 @@ DRESULT USER_read (
     while (count--) {
         SD_CS_LOW();
         uint8_t r1 = SD_SendCmd(CMD17, addr);
-        printf("[SD READ] CMD17 addr=%lu r1=0x%02X\r\n", addr, r1);
+        //printf("[SD READ] CMD17 addr=%lu r1=0x%02X\r\n", addr, r1);
         if (r1 != 0x00) {
             SD_CS_HIGH();
             SD_SPI_TxRx(0xFF);
@@ -296,7 +308,7 @@ DRESULT USER_read (
         }
 
         uint8_t token = SD_WaitToken(DATA_TOKEN_SINGLE, 200);
-        printf("[SD READ] data token=0x%02X\r\n", token);
+        //printf("[SD READ] data token=0x%02X\r\n", token);
         if (token != DATA_TOKEN_SINGLE) {
             SD_CS_HIGH();
             SD_SPI_TxRx(0xFF);
@@ -344,7 +356,7 @@ DRESULT USER_write (
     while (count--) {
         SD_CS_LOW();
         uint8_t r1 = SD_SendCmd(CMD24, addr);
-        printf("[SD WRITE] CMD24 addr=%lu r1=0x%02X\r\n", addr, r1);
+        //printf("[SD WRITE] CMD24 addr=%lu r1=0x%02X\r\n", addr, r1);
         if (r1 != 0x00) {
             SD_CS_HIGH();
             SD_SPI_TxRx(0xFF);
@@ -359,7 +371,7 @@ DRESULT USER_write (
         SD_SPI_TxRx(0xFF);
 
         uint8_t resp = SD_SPI_TxRx(0xFF);
-        printf("[SD WRITE] data response token=0x%02X\r\n", resp);
+        //printf("[SD WRITE] data response token=0x%02X\r\n", resp);
         if ((resp & DATA_RESP_MASK) != DATA_RESP_ACCEPTED) {
             SD_CS_HIGH();
             SD_SPI_TxRx(0xFF);
@@ -463,4 +475,3 @@ DRESULT USER_ioctl (
   /* USER CODE END IOCTL */
 }
 #endif /* _USE_IOCTL == 1 */
-

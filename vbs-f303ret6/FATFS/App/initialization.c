@@ -28,7 +28,7 @@
 /* USER CODE END Variables */
 
 /* Isolates SD-over-SPI driver (disk_write for diskio.c) from any FatFS layer activity */
-void Diskio_Init(void)
+void DISKIO_INIT(void)
 {
   printf("\r\nRaw Driver Test\r\n");
 
@@ -74,7 +74,7 @@ void Diskio_Init(void)
     printf("FAIL: No 0x55AA signature found (card may be unformatted)\r\n");
   }
 
-  /* Raw write/readback test -- far from boot sector/FAT/root dir, safe to scribble on */
+  /* Raw write/readback test - far from boot sector/FAT/root dir, safe to scribble on */
   static BYTE write_test_buf[512];
   static BYTE readback_buf[512];
   DWORD test_sector = 900000;   /* well within your 974848 total, far from metadata */
@@ -97,7 +97,7 @@ void Diskio_Init(void)
 }
 
 /* Tests FatFS interface itself */
-void FatFS_Init(void)
+void FATFS_INIT(void)
 {
   static FATFS fs;
   static FIL fil;

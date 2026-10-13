@@ -8,12 +8,12 @@ extern "C" {
 /**
  * @brief  Low-level diskio test.
  */
-void Diskio_Init(void);
+void DISKIO_INIT(void);
 
 /**
  * @brief  FatFs-level test.
  */
-void FatFS_Init(void);
+void FATFS_INIT(void);
 
 #ifdef __cplusplus
 }

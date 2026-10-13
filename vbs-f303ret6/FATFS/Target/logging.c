@@ -4,6 +4,7 @@
 #include "main.h"
 #include <stdio.h>
 #include <string.h>
+#include "logging.h"
 
 extern uint32_t SystemCoreClock;
 
@@ -41,21 +42,21 @@ static uint16_t overflow_count = 0;
 #define SYNC_EVERY_N_WRITES 25
 
 /* timestamp with Cortex-M4 DWT cycle counter, avoids needing a hardware timer (hopefully) */
-static void Timestamp_Init(void)
+static void TIMESTAMP_INIT(void)
 {
     CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
     DWT->CYCCNT = 0;
     DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
 }
 
-static inline uint32_t Timestamp_US(void)
+static inline uint32_t TIMESTAMP_US(void)
 {
     /* SystemCoreClock is 8 MHz per SystemClock_Config (HSI direct and no PLL) */
     return DWT->CYCCNT / (SystemCoreClock / 1000000UL);
 }
 
 /* Ring bugger push and pop functions, single threaded */
-static uint8_t Ring_Push(const LogBlock *blk)
+static uint8_t RING_PUSH(const LogBlock *blk)
 {
     if (ring_size >= RING_BLOCKS)
     {
@@ -68,7 +69,7 @@ static uint8_t Ring_Push(const LogBlock *blk)
     return 1;
 }
 
-static uint8_t Ring_Pop(LogBlock *out)
+static uint8_t RING_POP(LogBlock *out)
 {
     if (ring_size == 0) return 0;
     *out = ring_buf[ring_tail];
@@ -78,7 +79,7 @@ static uint8_t Ring_Pop(LogBlock *out)
 }
 
 /* Incrementing filenames as log000.bin, log001.bin, etc */
-static uint8_t Open_Next_File(void)
+static uint8_t OPEN_NEXT_FILE(void)
 {
     char name[16];
     FILINFO fno;
@@ -103,12 +104,114 @@ static uint8_t Open_Next_File(void)
     return 0;
 }
 
-void Logging_Init(void)
+void LOGGING_INIT(void)
 {
     /* Initialize FatFs and the timestamp system */
     static FATFS fs;
 
-    Timestamp_Init();
+    TIMESTAMP_INIT();
 
     FRESULT fr = f_mount(&fs, "", 1);
+    if (fr != FR_OK)
+    {
+        printf("FAIL: f_mount returned %d, logging disabled\r\n", fr);
+        return;
+    }
+
+    if (!OPEN_NEXT_FILE()) {return;}
+
+    /* Preallocation of a FAT table to possibly prevent stalling during ring-buffer pop */
+    fr = f_expand(&log_file, 64UL * 1024 * 1024, 1);
+    if (fr != FR_OK)
+    {
+        printf("WARN: f_expand returned %d, logging will continue but write stall may occur\r\n", fr);
+    }
+
+    /* refresh all of these variables */
+    current_sample_count = 0;
+    seq_counter = 0;
+    writes_since_sync = 0;
+    ring_head = ring_tail = ring_size = 0; /* ring buffer refrsh */
+}
+
+void LOGGING_ADD_SAMPLES(const uint8_t *raw, uint8_t entries)
+{
+    for (uint8_t i = 0; i < entries; i++)
+    {
+        const uint8_t *s = &raw[i * 6];
+
+        if (current_sample_count == 0)
+        {
+            /* stamp block with timestamp of its first sample */
+            current_block.t_us = TIMESTAMP_US();
+        }
+
+        /* shift the high byte up, keep the low byte down, and then stitch the two bytes together (little-endian data stream) */
+        current_block.xyz[current_sample_count][0] = (int16_t)(s[1] << 8 | s[0]);
+        current_block.xyz[current_sample_count][1] = (int16_t)(s[3] << 8 | s[2]);
+        current_block.xyz[current_sample_count][2] = (int16_t)(s[5] << 8 | s[4]);
+        current_sample_count++;
+
+        if (current_sample_count >= SAMPLES_PER_BLOCK)
+        {
+            current_block.magic = LOG_MAGIC;
+            current_block.seq = seq_counter++;
+
+        /* preprocessor directive, if statement won't occur during runtime */
+#if RING_BUFFER_ENABLED
+        RING_PUSH(&current_block);
+#else
+        {
+            uint32_t t0 = HAL_GetTick();
+            UINT bw;
+            FRESULT fr = f_write(&log_file, &current_block, sizeof(current_block), &bw);
+            uint32_t elapsed_ms = HAL_GetTick() - t0;
+
+            printf("Directly written: %lu ms, fr=%d, wrote %u/%u bytes, seq=%u\r\n",
+                (unsigned long)elapsed_ms, fr, bw, (unsigned)sizeof(current_block), current_block.seq);
+            if (fr == FR_OK && bw == sizeof(current_block))
+            {
+                if (++writes_since_sync >= SYNC_EVERY_N_WRITES)
+                {
+                    f_sync(&log_file);
+                    writes_since_sync = 0;
+                }
+            }
+        }
+#endif
+        current_sample_count = 0;
+        }
+    }
+}
+
+void LOGGING_TASK(void)
+{
+    /* preprocessor directive, if statement won't occur during runtime */
+#if RING_BUFFER_ENABLED
+    LogBlock blk;
+    if (!RING_POP(&blk)) return; /* if the pop failed, exit function early */
+
+    UINT bw;
+    FRESULT fr = f_write(&log_file, &blk, sizeof(blk), &bw);
+    if (fr != FR_OK || bw != sizeof(blk))
+    {
+        printf("FAIL: f_write returned %d, wrote %u/%u bytes\r\n", fr, bw, (unsigned)sizeof(blk));
+        return;
+    }
+
+    if (++writes_since_sync >= SYNC_EVERY_N_WRITES)
+    {
+        f_sync(&log_file);
+        writes_since_sync = 0;
+    }
+#else
+    /* nothing queued for this function to drain if the ring buffer is disabled*/
+#endif
+}
+
+void LOGGING_END(void)
+{
+    /* make sure the log file closes safely */
+    f_truncate(&log_file);
+    f_close(&log_file);
 }

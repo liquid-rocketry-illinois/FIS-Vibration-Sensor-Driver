@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "initialization.h"
+#include "logging.h"
 
 /* USER CODE END Includes */
 
@@ -141,8 +142,6 @@ DMA_HandleTypeDef hdma_spi2_tx;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-
-static FIL log_file;
 
 /*
  *  Declare variables
@@ -416,22 +415,14 @@ int main(void)
   printf("INT ENABLE: 0x%02X\r\n", SPI_READ(INT_ENABLE_REG));
   HAL_Delay(1000); // 1-second delay for checking register return values
 
-  printf("[INIT] Drained %d stale FIFO entries\r\n", DRAIN_FIFO());
+  printf("Drained %d stale FIFO entries\r\n", DRAIN_FIFO());
   __HAL_GPIO_EXTI_CLEAR_IT(INT2_Pin);
   fifo_ready = 0;
 
-  Diskio_Init();
-  FatFS_Init();
+  DISKIO_INIT();
+  FATFS_INIT();
 
-  FRESULT fr = f_open(&log_file, "log005.txt", FA_CREATE_ALWAYS | FA_WRITE);
-  if (fr != FR_OK) {
-    printf("[LOG] f_open failed: %d\r\n", fr);
-    Error_Handler();
-  }
-
-  CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
-  DWT->CYCCNT = 0;
-  DWT->CTRL  |= DWT_CTRL_CYCCNTENA_Msk;
+  LOGGING_INIT();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -452,34 +443,15 @@ int main(void)
 
         while (!dma_complete);
 
-        // Preliminary writing test 2
-
-        uint32_t t_us = DWT->CYCCNT / (SystemCoreClock / 1000000UL);
-
-        /* header (5 bytes) + up to 32 samples * 6 bytes = 197 bytes max */
-        uint8_t chunk_buf[5 + 32 * 6];
-
-        chunk_buf[0] = (uint8_t)(t_us >> 24);
-        chunk_buf[1] = (uint8_t)(t_us >> 16);
-        chunk_buf[2] = (uint8_t)(t_us >> 8);
-        chunk_buf[3] = (uint8_t)(t_us);
-        chunk_buf[4] = dma_entries;
-
-        memcpy(&chunk_buf[5], raw, dma_entries * 6);
-
-        UINT bw;
-        UINT to_write = 5 + dma_entries * 6;
-        FRESULT fr = f_write(&log_file, chunk_buf, to_write, &bw);
-        if (fr != FR_OK || bw != to_write) {
-          printf("[LOG] FAIL: f_write returned %d, wrote %u/%u bytes\r\n",
-                 fr, bw, (unsigned)to_write);
-        }
-
+        LOGGING_ADD_SAMPLES(raw, dma_entries);
 
         SPI_READ(INT_SOURCE_REG);
         __HAL_GPIO_EXTI_CLEAR_IT(INT2_Pin);
       }
     }
+
+    LOGGING_TASK();
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
