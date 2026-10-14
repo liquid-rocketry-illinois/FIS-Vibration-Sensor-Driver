@@ -86,7 +86,7 @@ static uint8_t OPEN_NEXT_FILE(void)
 
     for (uint16_t i = 0; i < 1000; i++)
     {
-        snprintf(name, sizeof(name), "log%03u.bin", (unsigned)i);
+        snprintf(name, sizeof(name), "log%03u.txt", (unsigned)i);
         if (f_stat(name, &fno) == FR_NO_FILE)
         {
             FRESULT fr = f_open(&log_file, name, FA_CREATE_NEW | FA_WRITE);
@@ -121,11 +121,13 @@ void LOGGING_INIT(void)
     if (!OPEN_NEXT_FILE()) {return;}
 
     /* Preallocation of a FAT table to possibly prevent stalling during ring-buffer pop */
+    /*
     fr = f_expand(&log_file, 64UL * 1024 * 1024, 1);
     if (fr != FR_OK)
     {
         printf("WARN: f_expand returned %d, logging will continue but write stall may occur\r\n", fr);
     }
+    */
 
     /* refresh all of these variables */
     current_sample_count = 0;
