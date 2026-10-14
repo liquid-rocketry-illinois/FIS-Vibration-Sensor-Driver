@@ -23,6 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -30,6 +31,22 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+
+#define RING_BUFFER_CAPACITY 1024
+
+typedef struct {
+    int16_t x;
+    int16_t y;
+    int16_t z;
+} AccelSample;
+
+typedef struct {
+    AccelSample samples[RING_BUFFER_CAPACITY];
+    uint16_t head;          // Next slot to write
+    uint16_t tail;          // Next slot to read
+    uint16_t count;         // Number of stored samples
+    uint32_t overflow_count; // Number of samples rejected because the buffer was full
+} RingBuffer;
 
 /* USER CODE END PTD */
 
@@ -150,6 +167,7 @@ volatile  uint8_t   dma_complete  = 0;      // DMA transfer complete flag
 volatile  uint8_t   dma_entries   = 0;      // how many entries DMA is reading
 
 static uint8_t raw[MAX_FIFO_ENTRIES * BYTES_PER_ENTRY];  // 192 bytes global DMA buffer
+static RingBuffer accel_buffer = {0};  // Software ring buffer for decoded XYZ samples
 
 /* USER CODE END PV */
 
@@ -166,6 +184,41 @@ static void MX_SPI3_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+/**
+ * @brief Add one accelerometer sample to the software ring buffer.
+ * @return true if stored, false if the buffer was full.
+ *
+ * When full, this implementation keeps older samples and drops the newest.
+ */
+bool RingBuffer_Push(RingBuffer *rb, AccelSample sample)
+{
+    if (rb->count >= RING_BUFFER_CAPACITY) {
+        rb->overflow_count++;
+        return false;
+    }
+
+    rb->samples[rb->head] = sample;
+    rb->head = (rb->head + 1U) % RING_BUFFER_CAPACITY;
+    rb->count++;
+    return true;
+}
+
+/**
+ * @brief Remove the oldest sample from the ring buffer.
+ * @return true if a sample was returned, false if the buffer was empty.
+ */
+bool RingBuffer_Pop(RingBuffer *rb, AccelSample *sample)
+{
+    if (rb->count == 0U || sample == NULL) {
+        return false;
+    }
+
+    *sample = rb->samples[rb->tail];
+    rb->tail = (rb->tail + 1U) % RING_BUFFER_CAPACITY;
+    rb->count--;
+    return true;
+}
 
 /**
   *  @brief   Write to one register with a singular SPI transaction
@@ -435,23 +488,20 @@ int main(void)
         SPI_READ_BURST_DMA(raw, dma_entries * BYTES_PER_ENTRY);
 
         while (!dma_complete);
-        // DEBUGGING PURPOSES ONLY, READS FIRST XYZ ENTRY IN BLOCK
-        int16_t dbg_x = (int16_t)(raw[1]<<8 | raw[0]);
-        int16_t dbg_y = (int16_t)(raw[3]<<8 | raw[2]);
-        int16_t dbg_z = (int16_t)(raw[5]<<8 | raw[4]);
-        printf("[DEBUG] ENTRIES=%d  FIRST: x=%d y=%d z=%d\r\n",
-               dma_entries, dbg_x, dbg_y, dbg_z);
-
-        /* UNCOMMENT IF WANT TO PRINT EACH ENTRY
+        // Decode every XYZ entry from the DMA buffer and queue it in RAM.
         for (uint8_t i = 0; i < dma_entries; i++)
         {
-          uint8_t *s  = &raw[i * BYTES_PER_ENTRY];
-          int16_t x   = (int16_t)(s[1]<<8 | s[0]);
-          int16_t y   = (int16_t)(s[3]<<8 | s[2]);
-          int16_t z   = (int16_t)(s[5]<<8 | s[4]);
-          printf("%d,%d,%d\r\n", x, y, z);
+          uint8_t *s = &raw[i * BYTES_PER_ENTRY];
+          AccelSample sample;
+
+          sample.x = (int16_t)((uint16_t)s[0] | ((uint16_t)s[1] << 8));
+          sample.y = (int16_t)((uint16_t)s[2] | ((uint16_t)s[3] << 8));
+          sample.z = (int16_t)((uint16_t)s[4] | ((uint16_t)s[5] << 8));
+
+          (void)RingBuffer_Push(&accel_buffer, sample);
         }
-        */
+
+        // SD logging can later call RingBuffer_Pop() to consume queued samples.
 
         SPI_READ(INT_SOURCE_REG);
         __HAL_GPIO_EXTI_CLEAR_IT(INT2_Pin);
