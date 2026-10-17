@@ -154,20 +154,28 @@ static uint8_t SD_SendCmd(uint8_t cmd, uint32_t arg)
 /* USER CODE END DECL */
 
 /* Private function prototypes -----------------------------------------------*/
-
 DSTATUS USER_initialize (BYTE pdrv);
-
 DSTATUS USER_status (BYTE pdrv);
-
 DRESULT USER_read (BYTE pdrv, BYTE *buff, DWORD sector, UINT count);
-
 #if _USE_WRITE == 1
   DRESULT USER_write (BYTE pdrv, const BYTE *buff, DWORD sector, UINT count);
 #endif /* _USE_WRITE == 1 */
-
 #if _USE_IOCTL == 1
   DRESULT USER_ioctl (BYTE pdrv, BYTE cmd, void *buff);
 #endif /* _USE_IOCTL == 1 */
+
+Diskio_drvTypeDef  USER_Driver =
+{
+  USER_initialize,
+  USER_status,
+  USER_read,
+#if  _USE_WRITE
+  USER_write,
+#endif  /* _USE_WRITE == 1 */
+#if  _USE_IOCTL == 1
+  USER_ioctl,
+#endif /* _USE_IOCTL == 1 */
+};
 
 /* Private functions ---------------------------------------------------------*/
 
@@ -264,7 +272,9 @@ DSTATUS USER_initialize (
   * @param  pdrv: Physical drive number (0..)
   * @retval DSTATUS: Operation status
   */
-DSTATUS USER_status (BYTE pdrv)
+DSTATUS USER_status (
+	BYTE pdrv       /* Physical drive number to identify the drive */
+)
 {
   /* USER CODE BEGIN STATUS */
     if (pdrv != 0)
@@ -475,3 +485,4 @@ DRESULT USER_ioctl (
   /* USER CODE END IOCTL */
 }
 #endif /* _USE_IOCTL == 1 */
+
