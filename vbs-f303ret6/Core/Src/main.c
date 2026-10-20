@@ -26,11 +26,29 @@
 #include <string.h>
 #include "initialization.h"
 #include "logging.h"
+#include <stdint.h>
 
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+
+#define RING_BUFFER_CAPACITY 1024
+
+typedef struct {
+  int16_t x;
+  int16_t y;
+  int16_t z;
+} AccelSample;
+
+typedef struct {
+  AccelSample samples[RING_BUFFER_CAPACITY];
+  uint16_t head;          // Next slot to write
+  uint16_t tail;          // Next slot to read
+  uint16_t count;         // Number of stored samples
+  uint32_t overflow_count; // Number of samples rejected because the buffer was full
+} RingBuffer;
+
 
 /* USER CODE END PTD */
 
@@ -153,6 +171,7 @@ volatile  uint8_t   dma_entries   = 0;      // how many entries DMA is reading
 
 static		uint32_t	adxl_overruns	=	0;			// counter for the number of times ADXL345 overruns
 static		uint8_t		raw[MAX_FIFO_ENTRIES * BYTES_PER_ENTRY];  // 192 bytes global DMA buffer
+static RingBuffer accel_buffer = {0};  // Software ring buffer for decoded XYZ samples
 
 /* USER CODE END PV */
 
