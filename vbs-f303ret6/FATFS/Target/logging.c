@@ -26,8 +26,8 @@ typedef struct
 #define RING_BLOCKS 32 /* ring buffer size */
 
 static LogBlock ring_buf[RING_BLOCKS];
-static volatile uint16_t ring_head = 0; /* next slot to write */
-static volatile uint16_t ring_tail = 0; /* next slot to read */
+static volatile uint16_t ring_head = 0; // next slot to write
+static volatile uint16_t ring_tail = 0; // next slot to read
 static volatile uint16_t ring_size = 0;
 
 static LogBlock current_block;
@@ -38,10 +38,10 @@ static FIL log_file;
 static uint32_t writes_since_sync = 0;
 static uint16_t overflow_count = 0;
 
-/* 5 seconds of data between f_sync calls to bound data loss on power-fail */
+// 5 seconds of data between f_sync calls to bound data loss on power-fail
 #define SYNC_EVERY_N_WRITES 25
 
-/* timestamp with Cortex-M4 DWT cycle counter, avoids needing a hardware timer (hopefully) */
+// timestamp with Cortex-M4 DWT cycle counter, avoids needing a hardware timer (hopefully)
 static void TIMESTAMP_INIT(void)
 {
     CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
@@ -76,6 +76,41 @@ static uint8_t RING_POP(LogBlock *out)
     ring_tail = (uint16_t)((ring_tail + 1) % RING_BLOCKS);
     ring_size--;
     return 1;
+}
+
+/**
+ * @brief Add one accelerometer sample to the software ring buffer.
+ * @return true if stored, false if the buffer was full.
+ *
+ * When full, this implementation keeps older samples and drops the newest.
+ */
+bool RingBuffer_Push(RingBuffer *rb, AccelSample sample)
+{
+    if (rb->count >= RING_BUFFER_CAPACITY) {
+        rb->overflow_count++;
+        return false;
+    }
+
+    rb->samples[rb->head] = sample;
+    rb->head = (rb->head + 1U) % RING_BUFFER_CAPACITY;
+    rb->count++;
+    return true;
+}
+
+/**
+ * @brief Remove the oldest sample from the ring buffer.
+ * @return true if a sample was returned, false if the buffer was empty.
+ */
+bool RingBuffer_Pop(RingBuffer *rb, AccelSample *sample)
+{
+    if (rb->count == 0U || sample == NULL) {
+        return false;
+    }
+
+    *sample = rb->samples[rb->tail];
+    rb->tail = (rb->tail + 1U) % RING_BUFFER_CAPACITY;
+    rb->count--;
+    return true;
 }
 
 /* Incrementing filenames as log000.bin, log001.bin, etc */
@@ -161,7 +196,7 @@ void LOGGING_ADD_SAMPLES(const uint8_t *raw, uint8_t entries)
 
         /* preprocessor directive, if statement won't occur during runtime */
 #if RING_BUFFER_ENABLED
-        RING_PUSH(&current_block);
+        RingBuffer_Push(&current_block);
 #else
         {
             uint32_t t0 = HAL_GetTick();
@@ -191,7 +226,7 @@ void LOGGING_TASK(void)
     /* preprocessor directive, if statement won't occur during runtime */
 #if RING_BUFFER_ENABLED
     LogBlock blk;
-    if (!RING_POP(&blk)) return; /* if the pop failed, exit function early */
+    if (!RingBuffer_Pop(&blk)) return; /* if the pop failed, exit function early */
 
     UINT bw;
     FRESULT fr = f_write(&log_file, &blk, sizeof(blk), &bw);

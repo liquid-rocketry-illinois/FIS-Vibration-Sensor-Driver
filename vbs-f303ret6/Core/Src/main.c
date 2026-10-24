@@ -22,9 +22,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
 #include "initialization.h"
 #include "logging.h"
 
@@ -32,6 +32,22 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+
+#define RING_BUFFER_CAPACITY 1024
+
+typedef struct {
+  int16_t x;
+  int16_t y;
+  int16_t z;
+} AccelSample;
+
+typedef struct {
+  AccelSample samples[RING_BUFFER_CAPACITY];
+  uint16_t head;          // Next slot to write
+  uint16_t tail;          // Next slot to read
+  uint16_t count;         // Number of stored samples
+  uint32_t overflow_count; // Number of samples rejected because the buffer was full
+} RingBuffer;
 
 /* USER CODE END PTD */
 
@@ -71,7 +87,7 @@
 #define FIFO_STREAM           (0x80)  // 10xx xxxx
 #define FIFO_TRIGGER          (0xC0)  // 11xx xxxx
 
-#define FIFO_WATERMARK        (0x1F)  // watermark = #31 (interrupt at 31 FIFO entries)
+#define FIFO_WATERMARK        (0x10)  // watermark = #16 (interrupt at 16 FIFO entries)
 
 /*
  *  Initialized registers for data formatting and ODR, respectively
@@ -115,7 +131,7 @@
 #define ADXL345_MB            (0x40)  // Bit 6 (MB)   multibyte
 
 /*
- *  ADXL345 CS configurations; CS is active high, pull low for slave access
+ *  ADXL345 CS configurations; CS is active low therefore pull low for slave access
  *  ADXL1_CS_LOW:   Pulls CS GPIO low (0)
  *  ADXL1_CS_HIGH:  Pulls CS GPIO high (1)
  */
@@ -151,7 +167,9 @@ volatile  uint8_t   fifo_ready    = 0;      // INT2 flag for FIFO watermark
 volatile  uint8_t   dma_complete  = 0;      // DMA transfer complete flag
 volatile  uint8_t   dma_entries   = 0;      // how many entries DMA is reading
 
-static uint8_t raw[MAX_FIFO_ENTRIES * BYTES_PER_ENTRY];  // 192 bytes global DMA buffer
+static uint32_t	adxl_overruns	=	0; // counter for the number of times ADXL345 overruns
+static uint8_t raw[MAX_FIFO_ENTRIES * BYTES_PER_ENTRY]; // 192 bytes global DMA buffer
+static RingBuffer accel_buffer = {0};  // Software ring buffer for decoded XYZ samples
 
 /* USER CODE END PV */
 
@@ -168,6 +186,27 @@ static void MX_SPI3_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+/**
+  *  @brief   Performs a us wait.
+  *
+  *  Note (Joseph): From HAL manual, "HAL_Delay... This function provides accurate delay
+  *  (in milliseconds) based on variable incremented."
+  *
+  *  Note: ADXL345 Datasheet, 21/36, "A delay of at least 5 μs should be present between
+  *  the trigger event occurring and the start of reading data from the FIFO to allow the FIFO to
+  *  discard and retain the necessary samples."
+  *
+  *  ^ We need to have to have higher wait precision, hence this function.
+  *
+  *  @param   us    uint32_t value specifying time to wait, in microseconds
+  */
+static void DELAY_US(uint32_t us)
+{
+  uint32_t t = DWT->CYCCNT, ticks = us * (SystemCoreClock / 1000000UL);
+  while ((DWT->CYCCNT - t) < ticks) {}
+}
+
 
 /**
   *  @brief   Write to one register with a singular SPI transaction
@@ -206,7 +245,7 @@ void SPI_WRITE_BURST(uint8_t reg, uint8_t *pData, uint8_t len)
 
   uint8_t tx[len];
   tx[0]     = ((reg & ~ADXL345_RW) | ADXL345_MB);
-  memcpy(&tx[1], pData, len);
+  memcpy(&tx[len+1], pData, len);
   ADXL1_CS_LOW();
   HAL_SPI_Transmit(&hspi2, tx, len, HAL_MAX_DELAY);
   ADXL1_CS_HIGH();
@@ -287,6 +326,34 @@ uint8_t DRAIN_FIFO(void)
   return drain;
 }
 
+/**
+  *  @brief   Call from EXTI interrupt only.
+  *
+  *  Note: ADXL345 Datasheet, 27/36, "Bits set to 1 in this register indicate that
+  *  their respective functions have triggered an event, whereas a value of 0
+  *  indicates that the corresponding event has not occurred."
+  *
+  *  adxl_overrun		static uint_32t (1 memory location)
+  *  Set ^ flag if LSB of INT_SOURCE register indicates FIFO has overrun.
+  *
+  *
+  */
+void FIFO_DRAIN_TO_LOG(void)
+{
+  if (SPI_READ(INT_SOURCE_REG) & 0x01)					// read bit 1 BEFORE draining
+  {
+    adxl_overruns++;
+  }
+  uint8_t n = SPI_READ(FIFO_STATUS_REG) & 0x3F;	// read # entries of FIFO_STATUS register
+
+  for (uint8_t i = 0; i < n; i++)
+  {
+    SPI_READ_BURST(DATA_X0_REG, &raw[i * BYTES_PER_ENTRY], 6);  // one entry per CS cycle
+    DELAY_US(6);                                                        // datasheet: >=5 us between FIFO pops
+  }
+  LOGGING_ADD_SAMPLES(raw, n);
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -346,7 +413,7 @@ int main(void)
    *  D[7:4]: 0
    *  D[3:0]: RATE BITS (ADXL345 datasheet, Table 7)
    */
-  SPI_WRITE(BW_RATE_REG, ODR_1600);   // Sets ODR to ODR_# Hz (bandwidth #/2 Hz)
+  SPI_WRITE(BW_RATE_REG, ODR_3200);   // Sets ODR to ODR_# Hz (bandwidth #/2 Hz)
   printf("BW RATE: 0x%02X\r\n", SPI_READ(BW_RATE_REG));
 
   /*
@@ -357,7 +424,7 @@ int main(void)
    *
    *  0b10110000 > 0x90
    */
-  SPI_WRITE(FIFO_CTL_REG, FIFO_STREAM | 0x20 | FIFO_WATERMARK);
+  SPI_WRITE(FIFO_CTL_REG, FIFO_STREAM | 0x10 | FIFO_WATERMARK);
   printf("FIFO CTL: 0x%02X\r\n", SPI_READ(FIFO_CTL_REG));   // expected 0xB0
 
   /*
@@ -427,30 +494,11 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+
   while (1)
   {
-    if (fifo_ready)
-    {
-      fifo_ready   = 0;
-      dma_complete = 0;
-
-      // Read entry count before starting DMA
-      dma_entries = SPI_READ(FIFO_STATUS_REG) & 0x3F;
-
-      if (dma_entries > 0)
-      {
-        SPI_READ_BURST_DMA(raw, dma_entries * BYTES_PER_ENTRY);
-
-        while (!dma_complete);
-
-        LOGGING_ADD_SAMPLES(raw, dma_entries);
-
-        SPI_READ(INT_SOURCE_REG);
-        __HAL_GPIO_EXTI_CLEAR_IT(INT2_Pin);
-      }
-    }
-
     LOGGING_TASK();
+  }
 
     /* USER CODE END WHILE */
 
@@ -578,7 +626,7 @@ static void MX_SPI3_Init(void)
   hspi3.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi3.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi3.Init.NSS = SPI_NSS_SOFT;
-  hspi3.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+  hspi3.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32;
   hspi3.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi3.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi3.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -669,10 +717,10 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOC_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, ADXL1_CS_Pin|GPIO_PIN_1, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, ADXL1_CS_Pin|GPIO_PIN_1, GPIO_PIN_SET);
 
-  /*Configure GPIO pins : ADXL1_CS_Pin PA1 */
-  GPIO_InitStruct.Pin = ADXL1_CS_Pin|GPIO_PIN_1;
+  /*Configure GPIO pins : ADXL1_CS_Pin SD_CS_Pin */
+  GPIO_InitStruct.Pin = ADXL1_CS_Pin|SD_CS_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -713,6 +761,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   if (GPIO_Pin == GPIO_PIN_5)
   {
     fifo_ready  = 1;  // sets interrupt flag for FIFO
+    FIFO_DRAIN_TO_LOG();
   }
 }
 
