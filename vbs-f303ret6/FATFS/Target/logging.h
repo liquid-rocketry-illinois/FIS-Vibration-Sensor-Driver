@@ -16,6 +16,8 @@ void LOGGING_TASK(void);
 void LOGGING_END(void);
 
 uint32_t LOGGING_GET_OVERFLOW_COUNT(void);
+uint32_t LOGGING_GET_BLOCKS_WRITTEN(void);
+uint8_t  LOGGING_IS_ACTIVE(void);
 
 #ifdef __cplusplus
 }

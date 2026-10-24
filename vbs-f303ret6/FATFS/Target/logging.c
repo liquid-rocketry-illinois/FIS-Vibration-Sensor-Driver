@@ -34,6 +34,7 @@ static volatile uint16_t ring_size = 0;
 static LogBlock current_block;
 static uint8_t current_sample_count = 0;
 static uint16_t seq_counter = 0;
+static uint32_t blk_written = 0;		// counter for the number of bugs written, DEBUG only
 
 static FIL log_file;
 static uint32_t writes_since_sync = 0;
@@ -208,6 +209,7 @@ void LOGGING_TASK(void)
         printf("[FAIL] f_write=%d, %u/%uB written\r\n", fr, bw, (unsigned)sizeof(blk));
         return;
     }
+	blk_written++;
 
     if (++writes_since_sync >= SYNC_EVERY_N_WRITES)
     {
@@ -226,7 +228,7 @@ void LOGGING_END(void)
     f_close(&log_file);
 }
 
-uint32_t LOGGING_GET_OVERFLOW_COUNT(void)
-{
-    return overflow_count;
-}
+// number of function returns for main.c
+uint32_t LOGGING_GET_OVERFLOW_COUNT(void) { return overflow_count; }
+uint32_t LOGGING_GET_BLOCKS_WRITTEN(void) { return blk_written; }
+uint8_t  LOGGING_IS_ACTIVE(void)          { return logging_active; }

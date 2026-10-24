@@ -168,10 +168,10 @@ const     uint16_t  odr __attribute__((unused)) = 3200;      // output data rate
 volatile  uint8_t   dma_complete  = 0;      // DMA transfer complete flag
 volatile  uint8_t   dma_entries   = 0;      // how many entries DMA is reading
 
-static volatile uint32_t isr_count, isr_cycles_max;		// counter for interrupt service routine AND running max of FIFO drain
-static		uint32_t	adxl_overruns	=	0;			// counter for the number of times ADXL345 overruns
-static		uint8_t		raw[MAX_FIFO_ENTRIES * BYTES_PER_ENTRY];  // 192 bytes global DMA buffer
-static RingBuffer accel_buffer = {0};  // Software ring buffer for decoded XYZ samples
+static volatile uint32_t	isr_count = 0, isr_cycles_max = 0;					// counter for interrupt service routine AND running max of FIFO drain
+static			uint32_t	adxl_overruns =	0;						// counter for the number of times ADXL345 overruns
+static			uint8_t		raw[MAX_FIFO_ENTRIES * BYTES_PER_ENTRY];	// 192 bytes global DMA buffer
+static			RingBuffer	accel_buffer = {0};							// Software ring buffer for decoded XYZ samples
 
 /* USER CODE END PV */
 
@@ -516,15 +516,25 @@ int main(void)
   	// LOGGING_TASK from logging.c
   	LOGGING_TASK();
 
-  	// basically this checks every 1 second, debug purposes only
+  	/*	basically this checks every 1 second, debug purposes only
+  	 *	---
+	 *	isr_count: number of interrupts since startup
+	 *	isr_cycles_max:	longest time it takes to write
+	 *	adxl_overruns: number of times FIFO buffer is overrun in ADXL
+	 *	LOGGING_GET_OVERFLOW_COUNT(): number of times ring buffer has overflown
+	 *	LOGGING_GET_BLOCKS_WRITTEN(): number of blks successfully written to SD card
+	 *	LOGGING_IS_ACTIVE(): boolean value for whether logging is active (1 true, 0 false)
+	 */
   	if (HAL_GetTick() - last >= 1000)
   	{
   		last += 1000;
-  		printf("isr=%lu max_isr=%lu us adxl_ovr=%lu ring_ovr=%lu\r\n",
-				 (unsigned long)isr_count,
-				 (unsigned long)(isr_cycles_max / (SystemCoreClock / 1000000UL)),
-				 (unsigned long)adxl_overruns,
-				 (unsigned long)LOGGING_GET_OVERFLOW_COUNT());
+  		printf("i=%lu max=%luus a_ovr=%lu rb_ovr=%lu wr=%lu a?=%u\r\n",
+			(unsigned long)isr_count,
+			(unsigned long)(isr_cycles_max / (SystemCoreClock / 1000000UL)),
+			(unsigned long)adxl_overruns,
+			(unsigned long)LOGGING_GET_OVERFLOW_COUNT(),
+			(unsigned long)LOGGING_GET_BLOCKS_WRITTEN(),
+			(unsigned)LOGGING_IS_ACTIVE());
   	}
 
     /* USER CODE END WHILE */
