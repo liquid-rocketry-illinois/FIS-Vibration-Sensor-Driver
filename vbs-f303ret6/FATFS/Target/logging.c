@@ -1,10 +1,9 @@
-
 #include "logging.h"
 #include "fatfs.h"
 #include "main.h"
 #include <stdio.h>
 #include <string.h>
-#include "logging.h"
+#include <stdbool.h>
 
 extern uint32_t SystemCoreClock;
 
@@ -12,8 +11,8 @@ extern uint32_t SystemCoreClock;
 typedef struct
 {
     uint16_t magic;
-    uint16_t seq; /* increments per block */
-    uint32_t t_us; /* microsecond timestamp */
+    uint16_t seq; // increments per block
+    uint32_t t_us; // microsecond timestamp of the block's first sample
     int16_t xyz[84][3];
 } LogBlock;
 #pragma pack(pop)
@@ -21,27 +20,36 @@ typedef struct
 #define SAMPLES_PER_BLOCK 84
 #define LOG_MAGIC 0xADC5
 
-/* Toggle the ring buffer on (1) and off (0) here*/
-#define RING_BUFFER_ENABLED 1
-#define RING_BLOCKS 32 /* ring buffer size */
+#define RING_BUFFER_CAPACITY 2688   /* 2688 samples * 6 bytes = 16KB */
 
-static LogBlock ring_buf[RING_BLOCKS];
-static volatile uint16_t ring_head = 0; // next slot to write
-static volatile uint16_t ring_tail = 0; // next slot to read
-static volatile uint16_t ring_size = 0;
+typedef struct {
+    int16_t x;
+    int16_t y;
+    int16_t z;
+} AccelSample;
 
-static LogBlock current_block;
-static uint8_t current_sample_count = 0;
-static uint16_t seq_counter = 0;
+typedef struct {
+    AccelSample samples[RING_BUFFER_CAPACITY];
+    uint16_t head;
+    uint16_t tail;
+    uint16_t count;
+    uint32_t overflow_count;
+} RingBuffer;
+
+static RingBuffer accel_buffer = {0};
 
 static FIL log_file;
 static uint32_t writes_since_sync = 0;
-static uint16_t overflow_count = 0;
+static uint16_t seq_counter = 0;
+
+// Block currently being assembled from popped samples, on the TASK/write side
+static LogBlock task_block;
+static uint8_t task_sample_count = 0;
 
 // 5 seconds of data between f_sync calls to bound data loss on power-fail
 #define SYNC_EVERY_N_WRITES 25
 
-// timestamp with Cortex-M4 DWT cycle counter, avoids needing a hardware timer (hopefully)
+// DWT-based microsecond timestamp
 static void TIMESTAMP_INIT(void)
 {
     CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
@@ -51,48 +59,24 @@ static void TIMESTAMP_INIT(void)
 
 static inline uint32_t TIMESTAMP_US(void)
 {
-    /* SystemCoreClock is 8 MHz per SystemClock_Config (HSI direct and no PLL) */
     return DWT->CYCCNT / (SystemCoreClock / 1000000UL);
-}
-
-/* Ring bugger push and pop functions, single threaded */
-static uint8_t RING_PUSH(const LogBlock *blk)
-{
-    if (ring_size >= RING_BLOCKS)
-    {
-        overflow_count++;
-        return 0; /* ring buffer full, so drop the block entirely */
-    }
-    ring_buf[ring_head] = *blk;
-    ring_head = (uint16_t)((ring_head + 1) % RING_BLOCKS);
-    ring_size++;
-    return 1;
-}
-
-static uint8_t RING_POP(LogBlock *out)
-{
-    if (ring_size == 0) return 0;
-    *out = ring_buf[ring_tail];
-    ring_tail = (uint16_t)((ring_tail + 1) % RING_BLOCKS);
-    ring_size--;
-    return 1;
 }
 
 /**
  * @brief Add one accelerometer sample to the software ring buffer.
  * @return true if stored, false if the buffer was full.
  *
- * When full, this implementation keeps older samples and drops the newest.
+ * Called from FIFO_DRAIN_TO_LOG() inside the EXTI ISR.
+ * When full, this drops the newest sample and counts the overflow.
  */
-bool RingBuffer_Push(RingBuffer *rb, AccelSample sample)
+static bool RingBuffer_Push(RingBuffer *rb, AccelSample sample)
 {
     if (rb->count >= RING_BUFFER_CAPACITY) {
         rb->overflow_count++;
         return false;
     }
-
     rb->samples[rb->head] = sample;
-    rb->head = (rb->head + 1U) % RING_BUFFER_CAPACITY;
+    rb->head = (uint16_t)((rb->head + 1U) % RING_BUFFER_CAPACITY);
     rb->count++;
     return true;
 }
@@ -100,20 +84,21 @@ bool RingBuffer_Push(RingBuffer *rb, AccelSample sample)
 /**
  * @brief Remove the oldest sample from the ring buffer.
  * @return true if a sample was returned, false if the buffer was empty.
+ *
+ * See RingBuffer_Push() for more info.
  */
-bool RingBuffer_Pop(RingBuffer *rb, AccelSample *sample)
+static bool RingBuffer_Pop(RingBuffer *rb, AccelSample *sample)
 {
     if (rb->count == 0U || sample == NULL) {
         return false;
     }
-
     *sample = rb->samples[rb->tail];
-    rb->tail = (rb->tail + 1U) % RING_BUFFER_CAPACITY;
+    rb->tail = (uint16_t)((rb->tail + 1U) % RING_BUFFER_CAPACITY);
     rb->count--;
     return true;
 }
 
-/* Incrementing filenames as log000.bin, log001.bin, etc */
+// Incrementing filenames as log000.bin, log001.bin, etc
 static uint8_t OPEN_NEXT_FILE(void)
 {
     char name[16];
@@ -121,7 +106,7 @@ static uint8_t OPEN_NEXT_FILE(void)
 
     for (uint16_t i = 0; i < 1000; i++)
     {
-        snprintf(name, sizeof(name), "log%03u.txt", (unsigned)i);
+        snprintf(name, sizeof(name), "log%03u.bin", (unsigned)i);
         if (f_stat(name, &fno) == FR_NO_FILE)
         {
             FRESULT fr = f_open(&log_file, name, FA_CREATE_NEW | FA_WRITE);
@@ -135,13 +120,11 @@ static uint8_t OPEN_NEXT_FILE(void)
         }
     }
     printf("FAIL: no free filename slot (1000 logs already made)\r\n");
-    /* this surely will not happen for a while, put the except code here just in case */
     return 0;
 }
 
 void LOGGING_INIT(void)
 {
-    /* Initialize FatFs and the timestamp system */
     static FATFS fs;
 
     TIMESTAMP_INIT();
@@ -153,9 +136,10 @@ void LOGGING_INIT(void)
         return;
     }
 
-    if (!OPEN_NEXT_FILE()) {return;}
+    if (!OPEN_NEXT_FILE()) { return; }
 
-    /* Preallocation of a FAT table to possibly prevent stalling during ring-buffer pop */
+    // Preallocation, avoids FatFs updating the FAT table mid-log every time the file grows
+    // Might prevent write stalls
     /*
     fr = f_expand(&log_file, 64UL * 1024 * 1024, 1);
     if (fr != FR_OK)
@@ -164,96 +148,83 @@ void LOGGING_INIT(void)
     }
     */
 
-    /* refresh all of these variables */
-    current_sample_count = 0;
+    task_sample_count = 0;
     seq_counter = 0;
     writes_since_sync = 0;
-    ring_head = ring_tail = ring_size = 0; /* ring buffer refrsh */
+    accel_buffer.head = accel_buffer.tail = accel_buffer.count = 0;
+    accel_buffer.overflow_count = 0;
 }
 
+/**
+ * @brief Decode one FIFO-drain's worth of raw 6-byte samples and push each one into the ring buffer.
+ *
+ */
 void LOGGING_ADD_SAMPLES(const uint8_t *raw, uint8_t entries)
 {
     for (uint8_t i = 0; i < entries; i++)
     {
         const uint8_t *s = &raw[i * 6];
 
-        if (current_sample_count == 0)
-        {
-            /* stamp block with timestamp of its first sample */
-            current_block.t_us = TIMESTAMP_US();
-        }
+        AccelSample sample;
+        sample.x = (int16_t)(s[1] << 8 | s[0]);
+        sample.y = (int16_t)(s[3] << 8 | s[2]);
+        sample.z = (int16_t)(s[5] << 8 | s[4]);
 
-        /* shift the high byte up, keep the low byte down, and then stitch the two bytes together (little-endian data stream) */
-        current_block.xyz[current_sample_count][0] = (int16_t)(s[1] << 8 | s[0]);
-        current_block.xyz[current_sample_count][1] = (int16_t)(s[3] << 8 | s[2]);
-        current_block.xyz[current_sample_count][2] = (int16_t)(s[5] << 8 | s[4]);
-        current_sample_count++;
-
-        if (current_sample_count >= SAMPLES_PER_BLOCK)
-        {
-            current_block.magic = LOG_MAGIC;
-            current_block.seq = seq_counter++;
-
-        /* preprocessor directive, if statement won't occur during runtime */
-#if RING_BUFFER_ENABLED
-        RingBuffer_Push(&current_block);
-#else
-        {
-            uint32_t t0 = HAL_GetTick();
-            UINT bw;
-            FRESULT fr = f_write(&log_file, &current_block, sizeof(current_block), &bw);
-            uint32_t elapsed_ms = HAL_GetTick() - t0;
-
-            printf("Directly written: %lu ms, fr=%d, wrote %u/%u bytes, seq=%u\r\n",
-                (unsigned long)elapsed_ms, fr, bw, (unsigned)sizeof(current_block), current_block.seq);
-            if (fr == FR_OK && bw == sizeof(current_block))
-            {
-                if (++writes_since_sync >= SYNC_EVERY_N_WRITES)
-                {
-                    f_sync(&log_file);
-                    writes_since_sync = 0;
-                }
-            }
-        }
-#endif
-        current_sample_count = 0;
-        }
+        RingBuffer_Push(&accel_buffer, sample);  // overflow_count self-tracks on failure
     }
 }
 
+/**
+ * @brief Called from the main loop. Pops available samples, assembles them into a 512-byte LogBlock,
+ *        and writes the block to SD once it's full.
+ */
 void LOGGING_TASK(void)
 {
-    /* preprocessor directive, if statement won't occur during runtime */
-#if RING_BUFFER_ENABLED
-    LogBlock blk;
-    if (!RingBuffer_Pop(&blk)) return; /* if the pop failed, exit function early */
+    AccelSample sample;
+
+    while (task_sample_count < SAMPLES_PER_BLOCK && RingBuffer_Pop(&accel_buffer, &sample))
+    {
+        if (task_sample_count == 0) {
+            task_block.t_us = TIMESTAMP_US();
+        }
+        task_block.xyz[task_sample_count][0] = sample.x;
+        task_block.xyz[task_sample_count][1] = sample.y;
+        task_block.xyz[task_sample_count][2] = sample.z;
+        task_sample_count++;
+    }
+
+    if (task_sample_count < SAMPLES_PER_BLOCK) {
+        return;   // not enough samples yet, try again next call
+    }
+
+    task_block.magic = LOG_MAGIC;
+    task_block.seq = seq_counter++;
 
     UINT bw;
-    FRESULT fr = f_write(&log_file, &blk, sizeof(blk), &bw);
-    if (fr != FR_OK || bw != sizeof(blk))
+    FRESULT fr = f_write(&log_file, &task_block, sizeof(task_block), &bw);
+    if (fr != FR_OK || bw != sizeof(task_block))
     {
-        printf("FAIL: f_write returned %d, wrote %u/%u bytes\r\n", fr, bw, (unsigned)sizeof(blk));
+        printf("FAIL: f_write returned %d, wrote %u/%u bytes\r\n", fr, bw, (unsigned)sizeof(task_block));
+        task_sample_count = 0;   // drop this block rather than retry it forever
         return;
     }
+
+    task_sample_count = 0;
 
     if (++writes_since_sync >= SYNC_EVERY_N_WRITES)
     {
         f_sync(&log_file);
         writes_since_sync = 0;
     }
-#else
-    /* nothing queued for this function to drain if the ring buffer is disabled*/
-#endif
 }
 
 void LOGGING_END(void)
 {
-    /* make sure the log file closes safely */
     f_truncate(&log_file);
     f_close(&log_file);
 }
 
 uint32_t LOGGING_GET_OVERFLOW_COUNT(void)
 {
-    return overflow_count;
+    return accel_buffer.overflow_count;
 }

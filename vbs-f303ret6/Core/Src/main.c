@@ -33,22 +33,6 @@
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 
-#define RING_BUFFER_CAPACITY 1024
-
-typedef struct {
-  int16_t x;
-  int16_t y;
-  int16_t z;
-} AccelSample;
-
-typedef struct {
-  AccelSample samples[RING_BUFFER_CAPACITY];
-  uint16_t head;          // Next slot to write
-  uint16_t tail;          // Next slot to read
-  uint16_t count;         // Number of stored samples
-  uint32_t overflow_count; // Number of samples rejected because the buffer was full
-} RingBuffer;
-
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -169,7 +153,6 @@ volatile  uint8_t   dma_entries   = 0;      // how many entries DMA is reading
 
 static uint32_t	adxl_overruns	=	0; // counter for the number of times ADXL345 overruns
 static uint8_t raw[MAX_FIFO_ENTRIES * BYTES_PER_ENTRY]; // 192 bytes global DMA buffer
-static RingBuffer accel_buffer = {0};  // Software ring buffer for decoded XYZ samples
 
 /* USER CODE END PV */
 
@@ -243,9 +226,9 @@ void SPI_WRITE_BURST(uint8_t reg, uint8_t *pData, uint8_t len)
    *  rx[7:0] = Data bits
    */
 
-  uint8_t tx[len];
-  tx[0]     = ((reg & ~ADXL345_RW) | ADXL345_MB);
-  memcpy(&tx[len+1], pData, len);
+  uint8_t tx[len+1];
+  tx[0] = ((reg & ~ADXL345_RW) | ADXL345_MB);
+  memcpy(&tx[1], pData, len);
   ADXL1_CS_LOW();
   HAL_SPI_Transmit(&hspi2, tx, len, HAL_MAX_DELAY);
   ADXL1_CS_HIGH();
@@ -504,7 +487,6 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-  }
   /* USER CODE END 3 */
 }
 
