@@ -22,7 +22,7 @@ typedef struct
 #define LOG_MAGIC 0xADC5
 
 /* Toggle the ring buffer on (1) and off (0) here*/
-#define RING_BUFFER_ENABLED 1
+#define RING_BUFFER_ENABLED 0
 #define RING_BLOCKS 32 /* ring buffer size */
 
 static LogBlock ring_buf[RING_BLOCKS];
@@ -120,7 +120,7 @@ void LOGGING_INIT(void)
 
     if (!OPEN_NEXT_FILE()) {return;}
 
-    /* Preallocation of a FAT table to possibly prevent stalling during ring-buffer pop */
+    // Preallocation of a FAT table to possibly prevent stalling during ring-buffer pop
     /*
     fr = f_expand(&log_file, 64UL * 1024 * 1024, 1);
     if (fr != FR_OK)

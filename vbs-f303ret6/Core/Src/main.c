@@ -170,6 +170,26 @@ static void MX_SPI3_Init(void);
 /* USER CODE BEGIN 0 */
 
 /**
+  *  @brief   Performs a us wait.
+  *
+  *  Note (Joseph): From HAL manual, "HAL_Delay... This function provides accurate delay
+  *  (in milliseconds) based on variable incremented."
+  *
+  *  Note: ADXL345 Datasheet, 21/36, "A delay of at least 5 μs should be present between
+  *  the trigger event occurring and the start of reading data from the FIFO to allow the FIFO to
+  *  discard and retain the necessary samples."
+  *
+  *  ^ We need to have to have higher wait precision, hence this function.
+  *
+  *  @param   us    uint32_t value specifying time to wait, in microseconds
+  */
+static void DELAY_US(uint32_t us)
+{
+  uint32_t t = DWT->CYCCNT, ticks = us * (SystemCoreClock / 1000000UL);
+  while ((DWT->CYCCNT - t) < ticks) {}
+}
+
+/**
   *  @brief   Write to one register with a singular SPI transaction
   *
   *  @param   reg   register address
@@ -282,6 +302,7 @@ uint8_t DRAIN_FIFO(void)
   {
     uint8_t dummy[6];
     SPI_READ_BURST(DATA_X0_REG, dummy, 6);
+    DELAY_US(6);
   }
   SPI_READ(INT_SOURCE_REG);                           // clears watermark latch
   return drain;
@@ -439,9 +460,11 @@ int main(void)
 
       if (dma_entries > 0)
       {
-        SPI_READ_BURST_DMA(raw, dma_entries * BYTES_PER_ENTRY);
-
-        while (!dma_complete);
+        for (uint8_t i = 0; i < dma_entries; i++)
+        {
+          SPI_READ_BURST(DATA_X0_REG, &raw[i * BYTES_PER_ENTRY], 6);  // one entry per CS cycle
+          DELAY_US(6);
+        }
 
         LOGGING_ADD_SAMPLES(raw, dma_entries);
 
