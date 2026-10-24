@@ -34,7 +34,7 @@ static volatile uint16_t ring_size = 0;
 static LogBlock current_block;
 static uint8_t current_sample_count = 0;
 static uint16_t seq_counter = 0;
-static uint32_t blk_written = 0;		// counter for the number of bugs written, DEBUG only
+static uint32_t blk_written = 0;		// counter for the number of blocks written, DEBUG only
 
 static FIL log_file;
 static uint32_t writes_since_sync = 0;
