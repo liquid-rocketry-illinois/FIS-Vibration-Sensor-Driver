@@ -91,7 +91,7 @@ static uint8_t OPEN_NEXT_FILE(void)
 
     for (uint16_t i = 0; i < 1000; i++)
     {
-        snprintf(name, sizeof(name), "log%03u.txt", (unsigned)i);
+        snprintf(name, sizeof(name), "log%03u.bin", (unsigned)i);
         if (f_stat(name, &fno) == FR_NO_FILE)
         {
             FRESULT fr = f_open(&log_file, name, FA_CREATE_NEW | FA_WRITE);
@@ -139,6 +139,7 @@ void LOGGING_INIT(void)
     seq_counter = 0;
     writes_since_sync = 0;
 	ring_head = ring_tail = 0;	// refresh ring buffer
+	logging_active = 1;
 }
 
 void LOGGING_ADD_SAMPLES(const uint8_t *raw, uint8_t entries)
@@ -175,7 +176,7 @@ void LOGGING_ADD_SAMPLES(const uint8_t *raw, uint8_t entries)
             FRESULT fr = f_write(&log_file, &current_block, sizeof(current_block), &bw);
             uint32_t elapsed_ms = HAL_GetTick() - t0;
 
-            printf("Directly written: %lu ms, fr=%d, wrote %u/%u bytes, seq=%u\r\n",
+            printf("%lu ms, fr=%d, %u/%uB, s=%u\r\n",
                 (unsigned long)elapsed_ms, fr, bw, (unsigned)sizeof(current_block), current_block.seq);
             if (fr == FR_OK && bw == sizeof(current_block))
             {
