@@ -13,17 +13,17 @@ extern uint32_t SystemCoreClock;
 typedef struct
 {
     uint16_t magic;
-    uint16_t seq; /* increments per block */
-    uint32_t t_us; /* microsecond timestamp */
+    uint16_t seq;	// increments per block
+    uint32_t t_us;	// microsecond timestamp
     int16_t xyz[84][3];
 } LogBlock;
 #pragma pack(pop)
 
 #define SAMPLES_PER_BLOCK 84
 #define LOG_MAGIC 0xADC5
-#define RING_BUFFER_ENABLED 0								// Toggle the ring buffer ON (1) and OFF (0) here
+#define RING_BUFFER_ENABLED 1								// Toggle the ring buffer ON (1) and OFF (0) here
 #define RING_BLOCKS 32										// ring buffer size
-#define SYNC_EVERY_N_WRITES 25								// 5 seconds of data between f_sync calls to bound data loss on power-fail
+#define SYNC_EVERY_N_WRITES 100								// 20 seconds of data between f_sync calls to bound data loss on power-fail
 #define RING_COUNT() ((uint16_t)(ring_head - ring_tail))	//
 
 static LogBlock ring_buf[RING_BLOCKS];
@@ -97,14 +97,14 @@ static uint8_t OPEN_NEXT_FILE(void)
             FRESULT fr = f_open(&log_file, name, FA_CREATE_NEW | FA_WRITE);
             if (fr != FR_OK)
             {
-                printf("FAIL: f_open(%s) returned %d\r\n", name, fr);
+                printf("[FAIL] f_open(%s) returned %d\r\n", name, fr);
                 return 0;
             }
             printf("Logging to %s\r\n", name);
             return 1;
         }
     }
-    printf("FAIL: no free filename slot (1000 logs already made)\r\n");
+    printf("[FAIL] no free filename slot (1000 logs already made)\r\n");
     /* this surely will not happen for a while, put the except code here just in case */
     return 0;
 }
@@ -119,7 +119,7 @@ void LOGGING_INIT(void)
     FRESULT fr = f_mount(&fs, "", 1);
     if (fr != FR_OK)
     {
-        printf("FAIL: f_mount returned %d, logging disabled\r\n", fr);
+        printf("[FAIL] f_mount=%d, logging disabled\r\n", fr);
         return;
     }
 
@@ -176,8 +176,8 @@ void LOGGING_ADD_SAMPLES(const uint8_t *raw, uint8_t entries)
             FRESULT fr = f_write(&log_file, &current_block, sizeof(current_block), &bw);
             uint32_t elapsed_ms = HAL_GetTick() - t0;
 
-            printf("%lu ms, fr=%d, %u/%uB, s=%u\r\n",
-                (unsigned long)elapsed_ms, fr, bw, (unsigned)sizeof(current_block), current_block.seq);
+            printf("%lu ms, fr=%d, %u/%uB, s=%u, ovr=%u\r\n",
+                (unsigned long)elapsed_ms, fr, bw, (unsigned)sizeof(current_block), current_block.seq, adxl_overruns);
             if (fr == FR_OK && bw == sizeof(current_block))
             {
                 if (++writes_since_sync >= SYNC_EVERY_N_WRITES)
@@ -205,7 +205,7 @@ void LOGGING_TASK(void)
     FRESULT fr = f_write(&log_file, &blk, sizeof(blk), &bw);
     if (fr != FR_OK || bw != sizeof(blk))
     {
-        printf("FAIL: f_write returned %d, wrote %u/%u bytes\r\n", fr, bw, (unsigned)sizeof(blk));
+        printf("[FAIL] f_write=%d, %u/%uB written\r\n", fr, bw, (unsigned)sizeof(blk));
         return;
     }
 

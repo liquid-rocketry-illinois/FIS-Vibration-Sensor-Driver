@@ -87,7 +87,7 @@ static void SD_SPI_SetFast(void)
 {
     __HAL_SPI_DISABLE(&hspi3);
     hspi3.Instance->CR1 &= ~SPI_CR1_BR;
-    hspi3.Instance->CR1 |= SPI_BAUDRATEPRESCALER_4;
+    hspi3.Instance->CR1 |= SPI_BAUDRATEPRESCALER_2;
     __HAL_SPI_ENABLE(&hspi3);
 }
 
@@ -361,9 +361,7 @@ DRESULT USER_write (
         }
 
         SD_SPI_TxRx(DATA_TOKEN_SINGLE);
-        for (uint16_t i = 0; i < 512; i++) {
-            SD_SPI_TxRx(buff[i]);
-        }
+    	HAL_SPI_Transmit(&hspi3, (uint8_t *)buff, 512, HAL_MAX_DELAY);
         SD_SPI_TxRx(0xFF);   /* dummy CRC (2 bytes), ignored in SPI mode */
         SD_SPI_TxRx(0xFF);
 

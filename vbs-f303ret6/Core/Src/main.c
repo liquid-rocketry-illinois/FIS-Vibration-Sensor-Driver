@@ -137,7 +137,7 @@ typedef struct {
  *  ADXL1_CS_HIGH:  Pulls CS GPIO high (1)
  */
 
-#define ADXL_CS_PORT           GPIOA
+#define ADXL_CS_PORT           GPIOA			// ik I defined a ADXL_CS in the .ioc but I'm too lazy to change it LOL
 #define ADXL_CS_PIN            GPIO_PIN_0
 
 #define ADXL1_CS_LOW()   HAL_GPIO_WritePin(ADXL_CS_PORT, ADXL_CS_PIN, GPIO_PIN_RESET)
@@ -168,6 +168,7 @@ const     uint16_t  odr __attribute__((unused)) = 3200;      // output data rate
 volatile  uint8_t   dma_complete  = 0;      // DMA transfer complete flag
 volatile  uint8_t   dma_entries   = 0;      // how many entries DMA is reading
 
+static volatile uint32_t isr_count, isr_cycles_max;		// counter for interrupt service routine AND running max of FIFO drain
 static		uint32_t	adxl_overruns	=	0;			// counter for the number of times ADXL345 overruns
 static		uint8_t		raw[MAX_FIFO_ENTRIES * BYTES_PER_ENTRY];  // 192 bytes global DMA buffer
 static RingBuffer accel_buffer = {0};  // Software ring buffer for decoded XYZ samples
@@ -507,9 +508,24 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+
+	uint32_t last = HAL_GetTick();	// variable for time in ms
+
   while (1)
   {
-    LOGGING_TASK();
+  	// LOGGING_TASK from logging.c
+  	LOGGING_TASK();
+
+  	// basically this checks every 1 second, debug purposes only
+  	if (HAL_GetTick() - last >= 1000)
+  	{
+  		last += 1000;
+  		printf("isr=%lu max_isr=%lu us adxl_ovr=%lu ring_ovr=%lu\r\n",
+				 (unsigned long)isr_count,
+				 (unsigned long)(isr_cycles_max / (SystemCoreClock / 1000000UL)),
+				 (unsigned long)adxl_overruns,
+				 (unsigned long)LOGGING_GET_OVERFLOW_COUNT());
+  	}
 
     /* USER CODE END WHILE */
 
@@ -769,10 +785,14 @@ int __io_putchar(int ch)
  */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-  if (GPIO_Pin == GPIO_PIN_5)
-  {
-    FIFO_DRAIN_TO_LOG();
-  }
+	if (GPIO_Pin == INT2_Pin)
+	{
+		uint32_t t0 = DWT->CYCCNT;						// current time
+		FIFO_DRAIN_TO_LOG();
+		uint32_t dt = DWT->CYCCNT - t0;					// change in time after draining to log
+		if (dt > isr_cycles_max) isr_cycles_max = dt;	// sets running max
+		isr_count++;									// increments interrupt counter
+	}
 }
 
 void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi)
