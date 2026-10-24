@@ -25,6 +25,11 @@ FIL USERFile;       /* File object for USER */
 
 /* USER CODE BEGIN Variables */
 
+#include "fatfs.h"
+#include "diskio.h"
+#include <stdio.h>
+#include <string.h>
+
 /* USER CODE END Variables */
 
 void MX_FATFS_Init(void)
@@ -33,7 +38,7 @@ void MX_FATFS_Init(void)
   retUSER = FATFS_LinkDriver(&USER_Driver, USERPath);
 
   /* USER CODE BEGIN Init */
-  /* additional user code for init */
+
   /* USER CODE END Init */
 }
 

@@ -26,13 +26,20 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 
 # Core project settings
 project(${CMAKE_PROJECT_NAME})
+set(CMAKE_C_FLAGS_DEBUG "-O2 -g3")
 message("Build type: " ${CMAKE_BUILD_TYPE})
 
 # Enable CMake support for ASM and C languages
 enable_language(C ASM)
 
 # Create an executable object type
-add_executable(${CMAKE_PROJECT_NAME})
+add_executable(${CMAKE_PROJECT_NAME}
+        FATFS/App/fatfs.c
+        FATFS/Target/logging.c
+        FATFS/Target/logging.h
+        FATFS/App/initialization.c
+        FATFS/App/initialization.h
+)
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
