@@ -36,17 +36,17 @@
 #define RING_BUFFER_CAPACITY 1024
 
 typedef struct {
-  int16_t x;
-  int16_t y;
-  int16_t z;
+  int16_t x;				// x acceleration values
+  int16_t y;				// y acceleration values
+  int16_t z;				// z acceleration values
 } AccelSample;
 
 typedef struct {
   AccelSample samples[RING_BUFFER_CAPACITY];
-  uint16_t head;          // Next slot to write
-  uint16_t tail;          // Next slot to read
-  uint16_t count;         // Number of stored samples
-  uint32_t overflow_count; // Number of samples rejected because the buffer was full
+  uint16_t head;			// Next slot to write
+  uint16_t tail;			// Next slot to read
+  uint16_t count;			// Number of stored samples
+  uint32_t overflow_count;	// Number of samples rejected because the buffer was full
 } RingBuffer;
 
 
@@ -165,7 +165,6 @@ UART_HandleTypeDef huart2;
  */
 const     uint16_t  odr __attribute__((unused)) = 3200;      // output data rate
 
-volatile  uint8_t   fifo_ready    = 0;      // INT2 flag for FIFO watermark
 volatile  uint8_t   dma_complete  = 0;      // DMA transfer complete flag
 volatile  uint8_t   dma_entries   = 0;      // how many entries DMA is reading
 
@@ -468,30 +467,30 @@ int main(void)
    */
   SPI_WRITE(POWER_CTL_REG, 0x08);
   printf("POWER CTL: 0x%02X\r\n", SPI_READ(POWER_CTL_REG));
-
-  /*
-   *  Sets the INT_ENABLE register
-   *  D7:     DATA READY  = 0
-   *  D[6:5]: TAP EVENTS    xx
-   *  D[4:3]: ACTIVITY      xx
-   *  D2:     FREE FALL     x
-   *  D1:     WATERMARK   = 1
-   *  D0:     OVERRUN     = 0
-   *
-   *  0b00000011 > 0x02
-   */
-  SPI_WRITE(INT_ENABLE_REG, 0x02);
-  printf("INT ENABLE: 0x%02X\r\n", SPI_READ(INT_ENABLE_REG));
   HAL_Delay(1000); // 1-second delay for checking register return values
 
-  printf("Drained %d stale FIFO entries\r\n", DRAIN_FIFO());
-  __HAL_GPIO_EXTI_CLEAR_IT(INT2_Pin);
-  fifo_ready = 0;
+	// SD Card inits
+	DISKIO_INIT();
+	FATFS_INIT();
+	LOGGING_INIT();
 
-	// SD card relevant inits
-  DISKIO_INIT();
-  FATFS_INIT();
-  LOGGING_INIT();
+	// Drains FIFO buffer in ADXL345 peripheral
+	printf("Drained %d stale FIFO entries\r\n", DRAIN_FIFO());
+	__HAL_GPIO_EXTI_CLEAR_IT(INT2_Pin);
+
+	/*
+ *  Sets the INT_ENABLE register
+ *  D7:     DATA READY  = 0
+ *  D[6:5]: TAP EVENTS    xx
+ *  D[4:3]: ACTIVITY      xx
+ *  D2:     FREE FALL     x
+ *  D1:     WATERMARK   = 1
+ *  D0:     OVERRUN     = 0
+ *
+ *  0b00000011 > 0x02
+ */
+	SPI_WRITE(INT_ENABLE_REG, 0x02);		// unblocks INT2
+	printf("INT ENABLE: 0x%02X\r\n", SPI_READ(INT_ENABLE_REG));
 
   /* USER CODE END 2 */
 
@@ -761,7 +760,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
   if (GPIO_Pin == GPIO_PIN_5)
   {
-    fifo_ready  = 1;  // sets interrupt flag for FIFO
     FIFO_DRAIN_TO_LOG();
   }
 }
