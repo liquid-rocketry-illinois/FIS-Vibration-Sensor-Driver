@@ -21,7 +21,7 @@ typedef struct
 
 #define SAMPLES_PER_BLOCK 84
 #define LOG_MAGIC 0xADC5
-#define RING_BUFFER_ENABLED 1								// Toggle the ring buffer ON (1) and OFF (0) here
+#define RING_BUFFER_ENABLED 0								// Toggle the ring buffer ON (1) and OFF (0) here
 #define RING_BLOCKS 32										// ring buffer size
 #define SYNC_EVERY_N_WRITES 25								// 5 seconds of data between f_sync calls to bound data loss on power-fail
 #define RING_COUNT() ((uint16_t)(ring_head - ring_tail))	//
