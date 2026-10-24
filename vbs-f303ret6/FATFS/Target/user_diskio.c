@@ -68,19 +68,6 @@ DRESULT USER_read (BYTE pdrv, BYTE *buff, DWORD sector, UINT count);
   DRESULT USER_ioctl (BYTE pdrv, BYTE cmd, void *buff);
 #endif
 
-Diskio_drvTypeDef  USER_Driver =
-{
-  USER_initialize,
-  USER_status,
-  USER_read,
-#if  _USE_WRITE
-  USER_write,
-#endif
-#if  _USE_IOCTL == 1
-  USER_ioctl,
-#endif
-};
-
 static uint8_t SD_SPI_TxRx(uint8_t data)
 {
     uint8_t rx = 0xFF;
@@ -420,7 +407,7 @@ DRESULT USER_ioctl (
 )
 {
   /* USER CODE BEGIN IOCTL */
-    printf("[SD IOCTL] pdrv=%u cmd=%u\r\n", pdrv, cmd);
+    // printf("[SD IOCTL] pdrv=%u cmd=%u\r\n", pdrv, cmd); // commented out to save time
     if (pdrv != 0) return RES_PARERR;
     if (Stat & STA_NOINIT) return RES_NOTRDY;
 

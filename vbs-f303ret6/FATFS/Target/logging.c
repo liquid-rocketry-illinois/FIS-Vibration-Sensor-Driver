@@ -8,6 +8,7 @@
 
 extern uint32_t SystemCoreClock;
 
+
 #pragma pack(push, 1)
 typedef struct
 {
@@ -20,14 +21,14 @@ typedef struct
 
 #define SAMPLES_PER_BLOCK 84
 #define LOG_MAGIC 0xADC5
-
-/* Toggle the ring buffer on (1) and off (0) here*/
-#define RING_BUFFER_ENABLED 1
-#define RING_BLOCKS 32 /* ring buffer size */
+#define RING_BUFFER_ENABLED 1								// Toggle the ring buffer ON (1) and OFF (0) here
+#define RING_BLOCKS 32										// ring buffer size
+#define SYNC_EVERY_N_WRITES 25								// 5 seconds of data between f_sync calls to bound data loss on power-fail
+#define RING_COUNT() ((uint16_t)(ring_head - ring_tail))	//
 
 static LogBlock ring_buf[RING_BLOCKS];
-static volatile uint16_t ring_head = 0; /* next slot to write */
-static volatile uint16_t ring_tail = 0; /* next slot to read */
+static volatile uint16_t ring_head;		// written only by ISR (interrupt service routine)
+static volatile uint16_t ring_tail;		// written only by main
 static volatile uint16_t ring_size = 0;
 
 static LogBlock current_block;
@@ -38,8 +39,7 @@ static FIL log_file;
 static uint32_t writes_since_sync = 0;
 static uint16_t overflow_count = 0;
 
-/* 5 seconds of data between f_sync calls to bound data loss on power-fail */
-#define SYNC_EVERY_N_WRITES 25
+static uint8_t logging_active = 0;		// global flag to indicate if
 
 /* timestamp with Cortex-M4 DWT cycle counter, avoids needing a hardware timer (hopefully) */
 static void TIMESTAMP_INIT(void)
@@ -55,27 +55,32 @@ static inline uint32_t TIMESTAMP_US(void)
     return DWT->CYCCNT / (SystemCoreClock / 1000000UL);
 }
 
-/* Ring bugger push and pop functions, single threaded */
+/**
+  *	@brief	Pushes a block to the ring buffer
+  *
+  * @param  blk		Pointer to block of memory to push to ring buffer
+  */
 static uint8_t RING_PUSH(const LogBlock *blk)
 {
-    if (ring_size >= RING_BLOCKS)
-    {
-        overflow_count++;
-        return 0; /* ring buffer full, so drop the block entirely */
-    }
-    ring_buf[ring_head] = *blk;
-    ring_head = (uint16_t)((ring_head + 1) % RING_BLOCKS);
-    ring_size++;
-    return 1;
+	if (RING_COUNT() >= RING_BLOCKS) { overflow_count++; return 0; }
+	ring_buf[ring_head % RING_BLOCKS] = *blk;
+	__DMB();                      /* data visible before head moves */
+	ring_head++;
+	return 1;
 }
 
+/**
+  *	@brief	Pops a block from the ring buffer
+  *
+  * @param  out		Pointer to block of memory to pop from buffer into
+  */
 static uint8_t RING_POP(LogBlock *out)
 {
-    if (ring_size == 0) return 0;
-    *out = ring_buf[ring_tail];
-    ring_tail = (uint16_t)((ring_tail + 1) % RING_BLOCKS);
-    ring_size--;
-    return 1;
+	if (RING_COUNT() == 0) return 0;
+	*out = ring_buf[ring_tail % RING_BLOCKS];
+	__DMB();
+	ring_tail++;
+	return 1;
 }
 
 /* Incrementing filenames as log000.bin, log001.bin, etc */
@@ -133,11 +138,12 @@ void LOGGING_INIT(void)
     current_sample_count = 0;
     seq_counter = 0;
     writes_since_sync = 0;
-    ring_head = ring_tail = ring_size = 0; /* ring buffer refrsh */
+	ring_head = ring_tail = 0;	// refresh ring buffer
 }
 
 void LOGGING_ADD_SAMPLES(const uint8_t *raw, uint8_t entries)
 {
+	if (!logging_active) return;
     for (uint8_t i = 0; i < entries; i++)
     {
         const uint8_t *s = &raw[i * 6];
@@ -188,6 +194,7 @@ void LOGGING_ADD_SAMPLES(const uint8_t *raw, uint8_t entries)
 
 void LOGGING_TASK(void)
 {
+	if (!logging_active) return;
     /* preprocessor directive, if statement won't occur during runtime */
 #if RING_BUFFER_ENABLED
     LogBlock blk;

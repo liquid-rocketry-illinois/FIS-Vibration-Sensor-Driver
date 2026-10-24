@@ -341,18 +341,25 @@ uint8_t DRAIN_FIFO(void)
   */
 void FIFO_DRAIN_TO_LOG(void)
 {
-  if (SPI_READ(INT_SOURCE_REG) & 0x01)					// read bit 1 BEFORE draining
-  {
-    adxl_overruns++;
-  }
-  uint8_t n = SPI_READ(FIFO_STATUS_REG) & 0x3F;	// read # entries of FIFO_STATUS register
+	if (SPI_READ(INT_SOURCE_REG) & 0x01)	// read bit 0 BEFORE draining, if bit 0 == 1, OVERRUN has occurred
+	{
+		adxl_overruns++;
+	}
 
-  for (uint8_t i = 0; i < n; i++)
-  {
-    SPI_READ_BURST(DATA_X0_REG, &raw[i * BYTES_PER_ENTRY], 6);  // one entry per CS cycle
-    DELAY_US(6);                                                        // datasheet: >=5 us between FIFO pops
-  }
-  LOGGING_ADD_SAMPLES(raw, n);
+	uint8_t n = SPI_READ(FIFO_STATUS_REG) & 0x3F;	// read # entries of FIFO_STATUS register
+	if (n > MAX_FIFO_ENTRIES) n = MAX_FIFO_ENTRIES;         /* raw[] holds 32 */
+
+	for (uint8_t i = 0; i < n; i++)
+	{
+		SPI_READ_BURST(DATA_X0_REG, &raw[i * BYTES_PER_ENTRY], 6);  // one entry per CS cycle
+		DELAY_US(6);                                                        // datasheet: >=5 us between FIFO pops
+	}
+	LOGGING_ADD_SAMPLES(raw, n);
+
+	// if the interrupt is STILL high, we need to repend it in Software Interrupt Event Register
+	if (HAL_GPIO_ReadPin(INT2_GPIO_Port, INT2_Pin) == GPIO_PIN_SET)
+    __HAL_GPIO_EXTI_GENERATE_SWIT(INT2_Pin);
+
 }
 
 /* USER CODE END 0 */
@@ -489,8 +496,12 @@ int main(void)
  *
  *  0b00000011 > 0x02
  */
+
+	__HAL_GPIO_EXTI_CLEAR_IT(INT2_Pin);				// clears pending bits from setup; UM1786 p. 221
+	HAL_NVIC_DisableIRQ(EXTI9_5_IRQn);
 	SPI_WRITE(INT_ENABLE_REG, 0x02);		// unblocks INT2
 	printf("INT ENABLE: 0x%02X\r\n", SPI_READ(INT_ENABLE_REG));
+	HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
   /* USER CODE END 2 */
 
@@ -711,10 +722,10 @@ static void MX_GPIO_Init(void)
   /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
-  __HAL_RCC_GPIOC_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, ADXL1_CS_Pin|SD_CS_Pin, GPIO_PIN_SET);
@@ -733,7 +744,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(INT2_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 1, 0);
   HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */

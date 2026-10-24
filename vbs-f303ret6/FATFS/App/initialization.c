@@ -47,7 +47,7 @@ void DISKIO_INIT(void)
 
   if (diskread == RES_OK)
   {
-    printf("Reported sector count: %lu (%lu MB)\r\n", sector_count, sector_count / 1024);
+    printf("Reported sector count: %lu (%lu MB)\r\n", sector_count, sector_count / 2048);	// scale by 1/2048 974848 sectors is 476 MB
   }
   else
   {
@@ -93,7 +93,7 @@ void DISKIO_INIT(void)
     }
   }
 
-  printf("Disk Test Complete");
+  printf("Disk Test Complete\r\n");
 }
 
 /* Tests FatFS interface itself */
@@ -182,6 +182,6 @@ void FATFS_INIT(void)
     printf("FAIL: f_getfree() returned FRESULT %d\r\n", fres);
   }
 
-  printf("Test Complete");
+  printf("Test Complete\r\n");
 
 }
