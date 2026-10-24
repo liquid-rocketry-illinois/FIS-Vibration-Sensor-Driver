@@ -33,7 +33,7 @@
 
 extern SPI_HandleTypeDef hspi3;
 
-/* SD card CS -- adjust port/pin if yours differ */
+/* SD card CS, adjust port/pin if yours differ */
 #define SD_CS_PORT   GPIOA
 #define SD_CS_PIN    GPIO_PIN_1
 #define SD_CS_LOW()  HAL_GPIO_WritePin(SD_CS_PORT, SD_CS_PIN, GPIO_PIN_RESET)
@@ -238,7 +238,7 @@ DSTATUS USER_initialize (
 
     if (r1 != 0x00) {
         Stat = STA_NOINIT;
-        return Stat;   /* card never left idle */
+        return Stat;   // card never left idle
     }
 
     CardType = 1;
@@ -247,7 +247,7 @@ DSTATUS USER_initialize (
         r1 = SD_SendCmd(CMD58, 0);
         if (r1 == 0x00) {
             for (int i = 0; i < 4; i++) ocr[i] = SD_SPI_TxRx(0xFF);
-            if (ocr[0] & 0x40) CardType = 2;   /* CCS bit and block addressing */
+            if (ocr[0] & 0x40) CardType = 2;   // CCS bit and block addressing
         }
         SD_CS_HIGH();
         SD_SPI_TxRx(0xFF);
