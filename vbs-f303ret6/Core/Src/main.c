@@ -400,6 +400,7 @@ int main(void)
   MX_FATFS_Init();
   MX_SPI3_Init();
   /* USER CODE BEGIN 2 */
+
   char msg[] = "[BOOT]\r\n";
   HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
 
@@ -423,7 +424,7 @@ int main(void)
    *  D[3:0]: RATE BITS (ADXL345 datasheet, Table 7)
    */
   SPI_WRITE(BW_RATE_REG, ODR_3200);   // Sets ODR to ODR_# Hz (bandwidth #/2 Hz)
-  printf("BW RATE: 0x%02X\r\n", SPI_READ(BW_RATE_REG));
+  // printf("BW RATE: 0x%02X\r\n", SPI_READ(BW_RATE_REG));
 
   /*
    *  Sets the FIFO_CTL register
@@ -434,7 +435,7 @@ int main(void)
    *  0b10110000 > 0x90
    */
   SPI_WRITE(FIFO_CTL_REG, FIFO_STREAM | 0x10 | FIFO_WATERMARK);
-  printf("FIFO CTL: 0x%02X\r\n", SPI_READ(FIFO_CTL_REG));   // expected 0xB0
+  // printf("FIFO CTL: 0x%02X\r\n", SPI_READ(FIFO_CTL_REG));   // expected 0xB0
 
   /*
    *  Sets the INT_MAP register
@@ -445,7 +446,7 @@ int main(void)
    *  0b00000011 > 0x02
    */
   SPI_WRITE(INT_MAP_REG, 0x02);
-  printf("INT MAP: 0x%02X\r\n", SPI_READ(INT_MAP_REG));
+  // printf("INT MAP: 0x%02X\r\n", SPI_READ(INT_MAP_REG));
 
   /*
    *  Sets the DATA_FORMAT register
@@ -460,7 +461,7 @@ int main(void)
    *  0b00001011 > 0x0B
    */
   SPI_WRITE(DATA_FORMAT_REG, 0x0B);
-  printf("DATA FORMAT: 0x%02X\r\n", SPI_READ(DATA_FORMAT_REG));
+  // printf("DATA FORMAT: 0x%02X\r\n", SPI_READ(DATA_FORMAT_REG));
 
   /*
    *  Sets the POWER_CTL register
@@ -474,8 +475,8 @@ int main(void)
    *  0b00001000 > 0x08
    */
   SPI_WRITE(POWER_CTL_REG, 0x08);
-  printf("POWER CTL: 0x%02X\r\n", SPI_READ(POWER_CTL_REG));
-  HAL_Delay(1000); // 1-second delay for checking register return values
+  // printf("POWER CTL: 0x%02X\r\n", SPI_READ(POWER_CTL_REG));
+  // HAL_Delay(1000); // 1-second delay for checking register return values
 
 	// SD Card inits
 	DISKIO_INIT();
@@ -483,7 +484,7 @@ int main(void)
 	LOGGING_INIT();
 
 	// Drains FIFO buffer in ADXL345 peripheral
-	printf("Drained %d stale FIFO entries\r\n", DRAIN_FIFO());
+	// printf("Drained %d stale FIFO entries\r\n", DRAIN_FIFO());
 	__HAL_GPIO_EXTI_CLEAR_IT(INT2_Pin);
 
 	/*
