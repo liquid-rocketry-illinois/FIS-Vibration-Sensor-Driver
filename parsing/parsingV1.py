@@ -3,11 +3,11 @@ import sys
 import csv
 
 block_size = 512 # number of bytes in there
-intended_magic = 0xADC5
+magic = 0xADC5
 sample_size = 84 # number of samples in each block
 
 # magic(H) + seq(H) + t_us(I) + 84*3 int16 (h) = 2+2+4+504 = 512 bytes
-block_format = "<HHI" + "h" * (sample_size * 3)
+BLOCK_FORMAT = "<HHI" + "h" * (sample_size * 3)
 
 
 def PARSE_LOGBLOCK(in_path, out_path):
@@ -29,11 +29,11 @@ def PARSE_LOGBLOCK(in_path, out_path):
                     print(f"WARN: {len(chunk)} trailing bytes at end of file")
                 break
 
-            fields = struct.unpack(block_format, chunk)
+            fields = struct.unpack(BLOCK_FORMAT, chunk)
             magic, seq, t_us = fields[0], fields[1], fields[2]
             samples = fields[3:] # 252 int16 values, 3 per sample
 
-            if magic != intended_magic:
+            if magic != magic:
                 blocks_skipped += 1
                 continue  # not a valid block, probably stale/unwritten space idk
 

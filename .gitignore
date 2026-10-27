@@ -1058,3 +1058,7 @@ dkms.conf
 *.uf2
 # Raspberry Pi Pico disassembler file
 *.dis
+
+# Data files from accelerometer
+*.csv
+*.bin
