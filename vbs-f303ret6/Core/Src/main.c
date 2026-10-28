@@ -167,6 +167,7 @@ const     uint16_t  odr __attribute__((unused)) = 3200;      // output data rate
 
 volatile  uint8_t   dma_complete  = 0;      // DMA transfer complete flag
 volatile  uint8_t   dma_entries   = 0;      // how many entries DMA is reading
+volatile  uint8_t   btn_pressed   = 0;
 
 static volatile uint32_t	isr_count = 0, isr_cycles_max = 0;					// counter for interrupt service routine AND running max of FIFO drain
 static			uint32_t	adxl_overruns =	0;						// counter for the number of times ADXL345 overruns
@@ -400,6 +401,7 @@ int main(void)
   MX_FATFS_Init();
   MX_SPI3_Init();
   /* USER CODE BEGIN 2 */
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
 
   char msg[] = "[BOOT]\r\n";
   HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
@@ -502,8 +504,10 @@ int main(void)
 	__HAL_GPIO_EXTI_CLEAR_IT(INT2_Pin);				// clears pending bits from setup; UM1786 p. 221
 	HAL_NVIC_DisableIRQ(EXTI9_5_IRQn);
 	SPI_WRITE(INT_ENABLE_REG, 0x02);		// unblocks INT2
-	printf("INT ENABLE: 0x%02X\r\n", SPI_READ(INT_ENABLE_REG));
+	// printf("INT ENABLE: 0x%02X\r\n", SPI_READ(INT_ENABLE_REG));
 	HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
 
   /* USER CODE END 2 */
 
@@ -528,14 +532,16 @@ int main(void)
 	 */
   	if (HAL_GetTick() - last >= 1000)
   	{
-  		last += 1000;
-  		printf("i=%lu max=%luus a_ovr=%lu rb_ovr=%lu wr=%lu a?=%u\r\n",
-			(unsigned long)isr_count,
-			(unsigned long)(isr_cycles_max / (SystemCoreClock / 1000000UL)),
-			(unsigned long)adxl_overruns,
-			(unsigned long)LOGGING_GET_OVERFLOW_COUNT(),
-			(unsigned long)LOGGING_GET_BLOCKS_WRITTEN(),
-			(unsigned)LOGGING_IS_ACTIVE());
+  	  last += 1000;
+  	  printf("i=%lu max=%luus a_ovr=%lu rb_ovr=%lu wr=%lu a?=%u\r\n",
+      (unsigned long)isr_count,
+      (unsigned long)(isr_cycles_max / (SystemCoreClock / 1000000UL)),
+      (unsigned long)adxl_overruns,
+      (unsigned long)LOGGING_GET_OVERFLOW_COUNT(),
+      (unsigned long)LOGGING_GET_BLOCKS_WRITTEN(),
+      (unsigned)LOGGING_IS_ACTIVE());
+  	  if (LOGGING_IS_ACTIVE()) { HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET); }
+  	  else { HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET); }
   	}
 
     /* USER CODE END WHILE */
@@ -757,8 +763,17 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, ADXL1_CS_Pin|SD_CS_Pin, GPIO_PIN_SET);
 
-  /*Configure GPIO pins : ADXL1_CS_Pin SD_CS_Pin */
-  GPIO_InitStruct.Pin = ADXL1_CS_Pin|SD_CS_Pin;
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(USER_LED_GPIO_Port, USER_LED_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin : USER_BTN_Pin */
+  GPIO_InitStruct.Pin = USER_BTN_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(USER_BTN_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : ADXL1_CS_Pin SD_CS_Pin USER_LED_Pin */
+  GPIO_InitStruct.Pin = ADXL1_CS_Pin|SD_CS_Pin|USER_LED_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -804,6 +819,12 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 		if (dt > isr_cycles_max) isr_cycles_max = dt;	// sets running max
 		isr_count++;									// increments interrupt counter
 	}
+  /*
+  if (GPIO_Pin == USER_BTN_Pin)
+  {
+    btn_pressed = 1;
+  }
+  */
 }
 
 void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi)
