@@ -6,7 +6,7 @@ The current implementation of the accelerometer driver is built to support I2C/S
 
 ## Usage
 
-<img width="480" height="360" alt="wiring_guide" src="https://github.com/liquid-rocketry-illinois/FIS-Vibration-Sensor-Driver/blob/dev/imagery/wiring_diagram.jpg"/> <br/>
+<img width="480" height="360" alt="wiring_guide" src="https://github.com/liquid-rocketry-illinois/FIS-Vibration-Sensor-Driver/blob/jwang849/imagery/wiring_diagram.jpg"/> <br/>
 The test connections to be made between the STM32F303RET6 and ADXL345 breakout are to be made as follows: <br/>
 <table border="1" style="border-collapse: collapse;">
    <thead>
