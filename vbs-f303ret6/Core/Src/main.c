@@ -137,7 +137,7 @@ typedef struct {
  *  ADXL1_CS_HIGH:  Pulls CS GPIO high (1)
  */
 
-#define ADXL_CS_PORT           GPIOA
+#define ADXL_CS_PORT           GPIOA			// ik I defined a ADXL_CS in the .ioc but I'm too lazy to change it LOL
 #define ADXL_CS_PIN            GPIO_PIN_0
 
 #define ADXL1_CS_LOW()   HAL_GPIO_WritePin(ADXL_CS_PORT, ADXL_CS_PIN, GPIO_PIN_RESET)
@@ -167,10 +167,12 @@ const     uint16_t  odr __attribute__((unused)) = 3200;      // output data rate
 
 volatile  uint8_t   dma_complete  = 0;      // DMA transfer complete flag
 volatile  uint8_t   dma_entries   = 0;      // how many entries DMA is reading
+volatile  uint8_t   btn_pressed   = 0;
 
-static		uint32_t	adxl_overruns	=	0;			// counter for the number of times ADXL345 overruns
-static		uint8_t		raw[MAX_FIFO_ENTRIES * BYTES_PER_ENTRY];  // 192 bytes global DMA buffer
-static RingBuffer accel_buffer = {0};  // Software ring buffer for decoded XYZ samples
+static volatile uint32_t	isr_count = 0, isr_cycles_max = 0;					// counter for interrupt service routine AND running max of FIFO drain
+static			uint32_t	adxl_overruns =	0;						// counter for the number of times ADXL345 overruns
+static			uint8_t		raw[MAX_FIFO_ENTRIES * BYTES_PER_ENTRY];	// 192 bytes global DMA buffer
+static			RingBuffer	accel_buffer = {0};							// Software ring buffer for decoded XYZ samples
 
 /* USER CODE END PV */
 
@@ -399,6 +401,8 @@ int main(void)
   MX_FATFS_Init();
   MX_SPI3_Init();
   /* USER CODE BEGIN 2 */
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
+
   char msg[] = "[BOOT]\r\n";
   HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
 
@@ -422,7 +426,7 @@ int main(void)
    *  D[3:0]: RATE BITS (ADXL345 datasheet, Table 7)
    */
   SPI_WRITE(BW_RATE_REG, ODR_3200);   // Sets ODR to ODR_# Hz (bandwidth #/2 Hz)
-  printf("BW RATE: 0x%02X\r\n", SPI_READ(BW_RATE_REG));
+  // printf("BW RATE: 0x%02X\r\n", SPI_READ(BW_RATE_REG));
 
   /*
    *  Sets the FIFO_CTL register
@@ -433,7 +437,7 @@ int main(void)
    *  0b10110000 > 0x90
    */
   SPI_WRITE(FIFO_CTL_REG, FIFO_STREAM | 0x10 | FIFO_WATERMARK);
-  printf("FIFO CTL: 0x%02X\r\n", SPI_READ(FIFO_CTL_REG));   // expected 0xB0
+  // printf("FIFO CTL: 0x%02X\r\n", SPI_READ(FIFO_CTL_REG));   // expected 0xB0
 
   /*
    *  Sets the INT_MAP register
@@ -444,7 +448,7 @@ int main(void)
    *  0b00000011 > 0x02
    */
   SPI_WRITE(INT_MAP_REG, 0x02);
-  printf("INT MAP: 0x%02X\r\n", SPI_READ(INT_MAP_REG));
+  // printf("INT MAP: 0x%02X\r\n", SPI_READ(INT_MAP_REG));
 
   /*
    *  Sets the DATA_FORMAT register
@@ -459,7 +463,7 @@ int main(void)
    *  0b00001011 > 0x0B
    */
   SPI_WRITE(DATA_FORMAT_REG, 0x0B);
-  printf("DATA FORMAT: 0x%02X\r\n", SPI_READ(DATA_FORMAT_REG));
+  // printf("DATA FORMAT: 0x%02X\r\n", SPI_READ(DATA_FORMAT_REG));
 
   /*
    *  Sets the POWER_CTL register
@@ -473,8 +477,8 @@ int main(void)
    *  0b00001000 > 0x08
    */
   SPI_WRITE(POWER_CTL_REG, 0x08);
-  printf("POWER CTL: 0x%02X\r\n", SPI_READ(POWER_CTL_REG));
-  HAL_Delay(1000); // 1-second delay for checking register return values
+  // printf("POWER CTL: 0x%02X\r\n", SPI_READ(POWER_CTL_REG));
+  // HAL_Delay(1000); // 1-second delay for checking register return values
 
 	// SD Card inits
 	DISKIO_INIT();
@@ -482,7 +486,7 @@ int main(void)
 	LOGGING_INIT();
 
 	// Drains FIFO buffer in ADXL345 peripheral
-	printf("Drained %d stale FIFO entries\r\n", DRAIN_FIFO());
+	// printf("Drained %d stale FIFO entries\r\n", DRAIN_FIFO());
 	__HAL_GPIO_EXTI_CLEAR_IT(INT2_Pin);
 
 	/*
@@ -500,16 +504,45 @@ int main(void)
 	__HAL_GPIO_EXTI_CLEAR_IT(INT2_Pin);				// clears pending bits from setup; UM1786 p. 221
 	HAL_NVIC_DisableIRQ(EXTI9_5_IRQn);
 	SPI_WRITE(INT_ENABLE_REG, 0x02);		// unblocks INT2
-	printf("INT ENABLE: 0x%02X\r\n", SPI_READ(INT_ENABLE_REG));
+	// printf("INT ENABLE: 0x%02X\r\n", SPI_READ(INT_ENABLE_REG));
 	HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+
+	uint32_t last = HAL_GetTick();	// variable for time in ms
+
   while (1)
   {
-    LOGGING_TASK();
+  	// LOGGING_TASK from logging.c
+  	LOGGING_TASK();
+
+  	/*	basically this checks every 1 second, debug purposes only
+  	 *	---
+	 *	isr_count: number of interrupts since startup
+	 *	isr_cycles_max:	longest time it takes to write
+	 *	adxl_overruns: number of times FIFO buffer is overrun in ADXL
+	 *	LOGGING_GET_OVERFLOW_COUNT(): number of times ring buffer has overflown
+	 *	LOGGING_GET_BLOCKS_WRITTEN(): number of blks successfully written to SD card
+	 *	LOGGING_IS_ACTIVE(): boolean value for whether logging is active (1 true, 0 false)
+	 */
+  	if (HAL_GetTick() - last >= 1000)
+  	{
+  	  last += 1000;
+  	  printf("i=%lu max=%luus a_ovr=%lu rb_ovr=%lu wr=%lu a?=%u\r\n",
+      (unsigned long)isr_count,
+      (unsigned long)(isr_cycles_max / (SystemCoreClock / 1000000UL)),
+      (unsigned long)adxl_overruns,
+      (unsigned long)LOGGING_GET_OVERFLOW_COUNT(),
+      (unsigned long)LOGGING_GET_BLOCKS_WRITTEN(),
+      (unsigned)LOGGING_IS_ACTIVE());
+  	  if (LOGGING_IS_ACTIVE()) { HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET); }
+  	  else { HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET); }
+  	}
 
     /* USER CODE END WHILE */
 
@@ -730,8 +763,17 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, ADXL1_CS_Pin|SD_CS_Pin, GPIO_PIN_SET);
 
-  /*Configure GPIO pins : ADXL1_CS_Pin SD_CS_Pin */
-  GPIO_InitStruct.Pin = ADXL1_CS_Pin|SD_CS_Pin;
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(USER_LED_GPIO_Port, USER_LED_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin : USER_BTN_Pin */
+  GPIO_InitStruct.Pin = USER_BTN_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(USER_BTN_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : ADXL1_CS_Pin SD_CS_Pin USER_LED_Pin */
+  GPIO_InitStruct.Pin = ADXL1_CS_Pin|SD_CS_Pin|USER_LED_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -769,10 +811,20 @@ int __io_putchar(int ch)
  */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-  if (GPIO_Pin == GPIO_PIN_5)
+	if (GPIO_Pin == INT2_Pin)
+	{
+		uint32_t t0 = DWT->CYCCNT;						// current time
+		FIFO_DRAIN_TO_LOG();
+		uint32_t dt = DWT->CYCCNT - t0;					// change in time after draining to log
+		if (dt > isr_cycles_max) isr_cycles_max = dt;	// sets running max
+		isr_count++;									// increments interrupt counter
+	}
+  /*
+  if (GPIO_Pin == USER_BTN_Pin)
   {
-    FIFO_DRAIN_TO_LOG();
+    btn_pressed = 1;
   }
+  */
 }
 
 void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi)
